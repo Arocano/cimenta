@@ -3,6 +3,7 @@ import { ROLE_LABEL } from "@/components/kit";
 import { Button } from "@/components/ui";
 import { requireSession } from "@/lib/session";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 const links = [
   ["/", "Obras"],
@@ -11,7 +12,8 @@ const links = [
 ];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const session = await requireSession();
+  const session = await requireSession({ allowInactive: true });
+  if (!session.orgActive && !session.isPlatformAdmin) redirect("/pendiente");
   return (
     <div className="min-h-screen md:grid md:grid-cols-[16rem_1fr]">
       <aside className="no-print flex flex-col bg-stone-950 px-4 py-5 text-stone-100">
@@ -19,6 +21,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <p className="mt-1 text-xs text-stone-400">{session.orgName}</p>
         <p className="mb-6 text-xs text-stone-500">{ROLE_LABEL[session.role]}</p>
         <nav className="grid gap-1">
+          {session.isPlatformAdmin ? (
+            <Link href="/plataforma" className="rounded-md px-2 py-2 text-sm hover:bg-stone-800">Plataforma</Link>
+          ) : null}
           {links.map(([href, label]) => (
             <Link key={href} href={href} className="rounded-md px-2 py-2 text-sm hover:bg-stone-800">{label}</Link>
           ))}

@@ -42,7 +42,7 @@ import {
   updateProject,
 } from "@/lib/domain";
 import { parseBudgetSheet } from "@/lib/files";
-import { assignProjects, createMember, loginAccount, logoutAccount, registerAccount, switchOrganization } from "@/lib/session";
+import { assignProjects, createMember, loginAccount, logoutAccount, registerAccount, setOrganizationActive, switchOrganization } from "@/lib/session";
 import type { Role, TableName } from "@/lib/types";
 
 function bounce(error: unknown, path: string): never {
@@ -88,6 +88,15 @@ export async function registerAction(form: FormData) {
 export async function logoutAction() {
   await logoutAccount();
   redirect("/login");
+}
+
+export async function setOrganizationActiveAction(form: FormData) {
+  try {
+    await setOrganizationActive(text(form, "orgId"), text(form, "active") === "true");
+    redirect("/plataforma");
+  } catch (error) {
+    bounce(error, "/plataforma");
+  }
 }
 
 export async function switchOrgAction(form: FormData) {

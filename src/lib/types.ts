@@ -19,7 +19,8 @@ export type IndirectMode =
 
 export type UserRow = { id: string; email: string; full_name: string; password_hash: string; created_at: string };
 export type Profile = { id: string; email: string; full_name: string; created_at: string };
-export type Organization = { id: string; name: string; created_at: string };
+export type Organization = { id: string; name: string; active: boolean; created_at: string };
+export type PlatformAdmin = { id: string; user_id: string; created_at: string };
 export type Membership = { id: string; org_id: string; user_id: string; role: Role };
 export type Invitation = { id: string; org_id: string; email: string; role: Role; token: string; created_at: string; accepted_at: string };
 export type ProjectMember = { id: string; org_id: string; project_id: string; user_id: string };
@@ -112,6 +113,7 @@ export type Database = {
   users: UserRow[];
   profiles: Profile[];
   organizations: Organization[];
+  platform_admins: PlatformAdmin[];
   organization_members: Membership[];
   invitations: Invitation[];
   project_members: ProjectMember[];
@@ -158,7 +160,7 @@ export type Database = {
 };
 
 export const TABLE_NAMES = [
-  "users", "profiles", "organizations", "organization_members", "invitations", "project_members", "units", "unit_conversions",
+  "users", "profiles", "organizations", "platform_admins", "organization_members", "invitations", "project_members", "units", "unit_conversions",
   "cities", "suppliers", "materials", "material_suppliers", "equipment", "labor_categories", "transport_rates",
   "catalog_chapters", "rubro_types", "catalog_rubros", "catalog_apu_lines", "price_snapshots", "price_snapshot_lines",
   "cpc_codes", "vae_thresholds", "projects", "project_chapters", "project_rubros", "project_apu_lines", "contributors",

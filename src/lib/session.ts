@@ -25,7 +25,9 @@ export type Session = {
   orgId: string;
   orgName: string;
   role: Role;
-  memberships: { orgId: string; orgName: string; role: Role }[];
+  orgActive: boolean;
+  isPlatformAdmin: boolean;
+  memberships: { orgId: string; orgName: string; role: Role; active: boolean }[];
   projectIds: string[];
 };
 
@@ -49,6 +51,32 @@ export function assertAdmin(session: Session) {
   if (session.role !== "admin") throw new AppError("Solo el administrador puede hacer este cambio.");
 }
 
+function platformEmails() {
+  return (process.env.CIMENTA_SUPERADMIN_EMAIL ?? "")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function orgIsActive(org: Organization | undefined) {
+  return org?.active !== false;
+}
+
+async function promotePlatformAdmin(userId: string, email: string) {
+  if (!platformEmails().includes(email.trim().toLowerCase())) return;
+  if (supabaseConfigured()) {
+    const admin = await createServiceClient();
+    if (!admin) return;
+    await admin.from("platform_admins").upsert({ user_id: userId }, { onConflict: "user_id" });
+    return;
+  }
+  await transaction(async (tx) => {
+    const existing = await tx.list("platform_admins", { user_id: userId });
+    if (existing.length) return;
+    await tx.insert("platform_admins", { user_id: userId, created_at: new Date().toISOString() });
+  });
+}
+
 async function assemble(userId: string, email: string): Promise<Session | null> {
   return transaction(async (tx) => {
     const membershipRows = (await tx.list("organization_members", { user_id: userId })) as Membership[];
@@ -60,6 +88,12 @@ async function assemble(userId: string, email: string): Promise<Session | null> 
     const org = orgs.find((item) => item.id === membership.org_id);
     const assigned = (await tx.list("project_members", { user_id: userId, org_id: membership.org_id })) as ProjectMember[];
     const profile = (await tx.list("profiles", { id: userId }))[0] as Profile | undefined;
+    let isPlatformAdmin = false;
+    try {
+      isPlatformAdmin = (await tx.list("platform_admins", { user_id: userId })).length > 0;
+    } catch {
+      isPlatformAdmin = false;
+    }
     return {
       userId,
       email: email || profile?.email || "",
@@ -67,11 +101,17 @@ async function assemble(userId: string, email: string): Promise<Session | null> 
       orgId: membership.org_id,
       orgName: org?.name ?? "Organización",
       role: membership.role,
-      memberships: membershipRows.map((item) => ({
-        orgId: item.org_id,
-        orgName: orgs.find((orgRow) => orgRow.id === item.org_id)?.name ?? "Organización",
-        role: item.role,
-      })),
+      orgActive: orgIsActive(org),
+      isPlatformAdmin,
+      memberships: membershipRows.map((item) => {
+        const current = orgs.find((orgRow) => orgRow.id === item.org_id);
+        return {
+          orgId: item.org_id,
+          orgName: current?.name ?? "Organización",
+          role: item.role,
+          active: orgIsActive(current),
+        };
+      }),
       projectIds: assigned.map((item) => item.project_id),
     };
   });
@@ -83,18 +123,22 @@ export async function getSession(): Promise<Session | null> {
     const supabase = await createClient();
     const { data } = await supabase.auth.getUser();
     if (!data.user) return null;
-    return assemble(data.user.id, data.user.email ?? "");
+    const email = data.user.email ?? "";
+    await promotePlatformAdmin(data.user.id, email);
+    return assemble(data.user.id, email);
   }
   const userId = (await cookies()).get(UID)?.value;
   if (!userId) return null;
   const user = await transaction(async (tx) => (await tx.list("users", { id: userId }))[0] as UserRow | undefined);
   if (!user) return null;
+  await promotePlatformAdmin(user.id, user.email);
   return assemble(user.id, user.email);
 }
 
-export async function requireSession(): Promise<Session> {
+export async function requireSession(options?: { allowInactive?: boolean }): Promise<Session> {
   const session = await getSession();
   if (!session) redirect("/login");
+  if (!options?.allowInactive && !session.orgActive && !session.isPlatformAdmin) redirect("/pendiente");
   return session;
 }
 
@@ -139,9 +183,11 @@ export async function registerAccount(input: { email: string; password: string; 
       await tx.update("invitations", String(invitation.id), { accepted_at: now });
     } else {
       if (!input.orgName.trim()) throw new AppError("Indique el nombre de la organización.");
-      const org = await tx.insert("organizations", { name: input.orgName.trim(), created_at: now });
+      const firstPlatformAdmin = (await tx.list("platform_admins")).length === 0;
+      const org = await tx.insert("organizations", { name: input.orgName.trim(), active: firstPlatformAdmin, created_at: now });
       orgId = org.id;
       await seedCatalog(tx, orgId);
+      if (firstPlatformAdmin) await tx.insert("platform_admins", { user_id: userId, created_at: now });
     }
     await tx.insert("organization_members", { org_id: orgId, user_id: userId, role });
     await remember(userId, orgId);
@@ -249,6 +295,36 @@ export async function assignProjects(userId: string, projectIds: string[]) {
     for (const projectId of projectIds) {
       await tx.insert("project_members", { org_id: session.orgId, project_id: projectId, user_id: userId });
     }
+  });
+}
+
+export async function listPlatformOrganizations() {
+  const session = await requireSession({ allowInactive: true });
+  if (!session.isPlatformAdmin) throw new AppError("Solo el administrador de la plataforma puede ver las organizaciones.");
+  return transaction(async (tx) => {
+    const orgs = (await tx.list("organizations")) as Organization[];
+    const members = (await tx.list("organization_members")) as Membership[];
+    const profiles = (await tx.list("profiles")) as Profile[];
+    return orgs
+      .map((org) => {
+        const admins = members.filter((member) => member.org_id === org.id && member.role === "admin");
+        return {
+          ...org,
+          active: org.active !== false,
+          admins: admins.map((member) => profiles.find((profile) => profile.id === member.user_id)?.email || "Sin correo"),
+        };
+      })
+      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  });
+}
+
+export async function setOrganizationActive(orgId: string, active: boolean) {
+  const session = await requireSession({ allowInactive: true });
+  if (!session.isPlatformAdmin) throw new AppError("Solo el administrador de la plataforma puede cambiar este estado.");
+  await transaction(async (tx) => {
+    const org = (await tx.list("organizations", { id: orgId }))[0];
+    if (!org) throw new AppError("La organización no existe.");
+    await tx.update("organizations", orgId, { active });
   });
 }
 

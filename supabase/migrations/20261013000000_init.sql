@@ -12,6 +12,13 @@ create table profiles (
 create table organizations (
   id uuid primary key default gen_random_uuid(),
   name text not null,
+  active boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+create table platform_admins (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null unique references auth.users (id) on delete cascade,
   created_at timestamptz not null default now()
 );
 
@@ -497,6 +504,11 @@ returns boolean language sql stable security definer set search_path = public as
   select org_role(oid) in ('admin', 'presupuestador')
 $$;
 
+create or replace function is_platform_admin()
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from platform_admins where user_id = auth.uid())
+$$;
+
 create or replace function shares_org(other uuid)
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (
@@ -602,10 +614,16 @@ begin
       insert into organization_members (org_id, user_id, role)
       values (meta_org, new.id, coalesce(new.raw_user_meta_data->>'role', 'consulta'));
     else
-      insert into organizations (name)
-      values (coalesce(nullif(new.raw_user_meta_data->>'org_name', ''), 'Organización'))
+      insert into organizations (name, active)
+      values (
+        coalesce(nullif(new.raw_user_meta_data->>'org_name', ''), 'Organización'),
+        not exists (select 1 from platform_admins)
+      )
       returning id into oid;
       insert into organization_members (org_id, user_id, role) values (oid, new.id, 'admin');
+      if not exists (select 1 from platform_admins) then
+        insert into platform_admins (user_id) values (new.id);
+      end if;
       perform seed_org_catalog(oid);
     end if;
   end if;
@@ -619,14 +637,16 @@ create trigger on_auth_user_created
 
 alter table profiles enable row level security;
 alter table organizations enable row level security;
+alter table platform_admins enable row level security;
 alter table organization_members enable row level security;
 alter table invitations enable row level security;
 
-create policy profiles_select on profiles for select using (id = auth.uid() or shares_org(id));
+create policy profiles_select on profiles for select using (id = auth.uid() or shares_org(id) or is_platform_admin());
 create policy profiles_update on profiles for update using (id = auth.uid());
-create policy organizations_select on organizations for select using (is_org_member(id));
-create policy organizations_update on organizations for update using (is_org_admin(id));
-create policy members_select on organization_members for select using (is_org_member(org_id) or user_id = auth.uid());
+create policy organizations_select on organizations for select using (is_org_member(id) or is_platform_admin());
+create policy organizations_update on organizations for update using (is_org_admin(id) or is_platform_admin());
+create policy platform_admins_select on platform_admins for select using (user_id = auth.uid() or is_platform_admin());
+create policy members_select on organization_members for select using (is_org_member(org_id) or user_id = auth.uid() or is_platform_admin());
 create policy members_write on organization_members for all using (is_org_admin(org_id)) with check (is_org_admin(org_id));
 create policy invitations_admin on invitations for all using (is_org_admin(org_id)) with check (is_org_admin(org_id));
 

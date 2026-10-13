@@ -16,7 +16,8 @@ El nombre del producto es Cimenta. No renombrar la aplicación, el paquete ni la
 
 - Interfaz en español de Ecuador: fechas día/mes/año, moneda USD, locale `es-EC`.
 - Multi-organización. Cada empresa tiene su base de precios y sus obras.
-- Roles: `admin`, `presupuestador`, `bodega`, `consulta`. El admin ve todas las obras; el resto solo las asignadas en `project_members`.
+- Roles de organización: `admin`, `presupuestador`, `bodega`, `consulta`. El admin ve todas las obras de su empresa; el resto solo las asignadas en `project_members`.
+- El administrador de plataforma (`platform_admins`) activa o desactiva organizaciones. Una organización nueva nace inactiva (`organizations.active`). Sus miembros no usan la aplicación hasta que se active.
 - Un registro de catálogo en uso no se elimina.
 - Un rubro auxiliar entra como material de otro rubro, un solo nivel.
 - Los coeficientes de la fórmula polinómica suman 1.

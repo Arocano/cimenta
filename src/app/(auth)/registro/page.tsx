@@ -14,7 +14,7 @@ export default async function RegisterPage({ searchParams }: { searchParams: Pro
           <TextField label="Nombre" name="fullName" required />
           <TextField label="Correo" name="email" type="email" required />
           <TextField label="Clave" name="password" type="password" required hint="Mínimo 6 caracteres." />
-          <TextField label="Organización" name="orgName" hint="Empresa, entidad o estudio. Si entra con invitación, puede dejarlo vacío." />
+          <TextField label="Organización" name="orgName" hint="Empresa, entidad o estudio. Queda inactiva hasta que el administrador de la plataforma la active. Con invitación, puede dejarlo vacío." />
           <input type="hidden" name="invitation" defaultValue={query.invitacion ?? ""} />
           <Button type="submit" className="w-full">Crear cuenta</Button>
         </form>
