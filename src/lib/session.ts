@@ -63,16 +63,25 @@ function orgIsActive(org: Organization | undefined) {
 }
 
 async function promotePlatformAdmin(userId: string, email: string) {
-  if (!platformEmails().includes(email.trim().toLowerCase())) return;
+  const listed = platformEmails().includes(email.trim().toLowerCase());
   if (supabaseConfigured()) {
     const admin = await createServiceClient();
     if (!admin) return;
+    if (!listed) {
+      const { count } = await admin.from("platform_admins").select("user_id", { count: "exact", head: true });
+      if (count && count > 0) return;
+      const { data: membership } = await admin.from("organization_members").select("user_id").eq("user_id", userId).eq("role", "admin").limit(1);
+      if (!membership?.length) return;
+    }
     await admin.from("platform_admins").upsert({ user_id: userId }, { onConflict: "user_id" });
     return;
   }
   await transaction(async (tx) => {
     const existing = await tx.list("platform_admins", { user_id: userId });
     if (existing.length) return;
+    const others = await tx.list("platform_admins");
+    const isOrgAdmin = (await tx.list("organization_members", { user_id: userId, role: "admin" })).length > 0;
+    if (!listed && (others.length > 0 || !isOrgAdmin)) return;
     await tx.insert("platform_admins", { user_id: userId, created_at: new Date().toISOString() });
   });
 }
@@ -124,15 +133,23 @@ export async function getSession(): Promise<Session | null> {
     const { data } = await supabase.auth.getUser();
     if (!data.user) return null;
     const email = data.user.email ?? "";
-    await promotePlatformAdmin(data.user.id, email);
-    return assemble(data.user.id, email);
+    let session = await assemble(data.user.id, email);
+    if (session && !session.isPlatformAdmin) {
+      await promotePlatformAdmin(data.user.id, email);
+      session = await assemble(data.user.id, email);
+    }
+    return session;
   }
   const userId = (await cookies()).get(UID)?.value;
   if (!userId) return null;
   const user = await transaction(async (tx) => (await tx.list("users", { id: userId }))[0] as UserRow | undefined);
   if (!user) return null;
-  await promotePlatformAdmin(user.id, user.email);
-  return assemble(user.id, user.email);
+  let session = await assemble(user.id, user.email);
+  if (session && !session.isPlatformAdmin) {
+    await promotePlatformAdmin(user.id, user.email);
+    session = await assemble(user.id, user.email);
+  }
+  return session;
 }
 
 export async function requireSession(options?: { allowInactive?: boolean }): Promise<Session> {
