@@ -1,6 +1,6 @@
 import { advanceAction, certificateAction, certificateLineAction, deductionAction, removeExecutionAction } from "@/app/actions";
-import { Money, Notice, Panel, Submit, TextField } from "@/components/kit";
-import { Select } from "@/components/ui";
+import { Field, Money, Notice, Panel, Submit, TextField } from "@/components/kit";
+import { Button, Select } from "@/components/ui";
 import { projectBundle } from "@/lib/domain";
 import { adjustedValue } from "@/lib/engine/budget";
 import { dec, formatMoney } from "@/lib/engine/money";
@@ -27,13 +27,42 @@ export default async function CertificatesPage({ params, searchParams }: { param
       <Notice message={query.aviso} />
       <Panel title="Anticipo y deducibles">
         <ul className="mb-3 text-sm">
-          {data.advances.map((item) => <li key={item.id}>{item.advance_date}: <Money value={item.amount} /> reajustado <Money value={adjustedValue(item.amount, factor)} /> · {item.note} {editable ? <form className="inline" action={removeExecutionAction}><input type="hidden" name="projectId" value={id} /><input type="hidden" name="table" value="contract_advances" /><input type="hidden" name="id" value={item.id} /><button className="text-xs underline">quitar</button></form> : null}</li>)}
+          {data.advances.map((item) => (
+            <li key={item.id} className="flex flex-wrap items-center gap-2">
+              <span>{item.advance_date}: <Money value={item.amount} /> reajustado <Money value={adjustedValue(item.amount, factor)} /> · {item.note}</span>
+              {editable ? (
+                <form action={removeExecutionAction}>
+                  <input type="hidden" name="projectId" value={id} />
+                  <input type="hidden" name="table" value="contract_advances" />
+                  <input type="hidden" name="id" value={item.id} />
+                  <Button type="submit" variant="danger" className="h-8">Quitar anticipo</Button>
+                </form>
+              ) : null}
+            </li>
+          ))}
           {data.deductions.map((item) => <li key={item.id}>{item.name}: {item.amount} {item.mode === "percent" ? "%" : "USD"}</li>)}
         </ul>
         {editable ? (
           <div className="grid gap-4 md:grid-cols-2">
-            <form action={advanceAction} className="space-y-2"><input type="hidden" name="projectId" value={id} /><TextField label="Anticipo" name="amount" /><TextField label="Fecha" name="advance_date" type="date" /><TextField label="Nota" name="note" /><Submit>Registrar anticipo</Submit></form>
-            <form action={deductionAction} className="space-y-2"><input type="hidden" name="projectId" value={id} /><TextField label="Deducible" name="name" /><Select name="mode"><option value="amount">Valor fijo</option><option value="percent">Porcentaje</option></Select><TextField label="Valor" name="amount" /><Submit>Registrar deducible</Submit></form>
+            <form action={advanceAction} className="space-y-4">
+              <input type="hidden" name="projectId" value={id} />
+              <TextField label="Anticipo (USD)" name="amount" type="number" required />
+              <TextField label="Fecha" name="advance_date" type="date" />
+              <TextField label="Nota" name="note" placeholder="Ejemplo: anticipo contractual" />
+              <Submit pending="Registrando…">Registrar anticipo</Submit>
+            </form>
+            <form action={deductionAction} className="space-y-4">
+              <input type="hidden" name="projectId" value={id} />
+              <TextField label="Deducible" name="name" required placeholder="Ejemplo: retención" />
+              <Field label="Forma" required>
+                <Select name="mode" defaultValue="amount">
+                  <option value="amount">Valor fijo en USD</option>
+                  <option value="percent">Porcentaje del avance</option>
+                </Select>
+              </Field>
+              <TextField label="Valor" name="amount" type="number" required />
+              <Submit pending="Registrando…">Registrar deducible</Submit>
+            </form>
           </div>
         ) : null}
       </Panel>
@@ -64,9 +93,9 @@ export default async function CertificatesPage({ params, searchParams }: { param
               </form>
             ) : null}
             <p className="text-sm">Avance {formatMoney(progress)} · Reajuste {formatMoney(readjusted.minus(progress))} · Amortización {formatMoney(amortization)} · Deducibles {formatMoney(deductions)} · A pagar {formatMoney(payable)}</p>
-            {!data.polynomial.valid ? <p className="text-sm text-amber-800">La fórmula no suma uno, así que el reajuste de esta planilla queda en cero hasta corregir los coeficientes.</p> : null}
+            {!data.polynomial.valid ? <p className="text-sm text-warning-foreground">La fórmula no suma uno, así que el reajuste de esta planilla queda en cero hasta corregir los coeficientes.</p> : null}
           </div>
-        ) : <p className="text-sm text-stone-500">Todavía no hay planillas.</p>}
+        ) : <p className="text-sm text-muted-foreground">Todavía no hay planillas.</p>}
       </Panel>
     </div>
   );

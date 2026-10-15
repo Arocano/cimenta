@@ -1,6 +1,6 @@
 import { addChapterAction, addLineAction, addRubroAction, moveAction, priceToolsAction, removeBudgetAction, updateLineAction, updateRubroAction } from "@/app/actions";
-import { DataTable, Field, Money, Notice, Panel, Submit, TextField } from "@/components/kit";
-import { Select } from "@/components/ui";
+import { CheckChip, DataTable, Field, Money, Notice, Panel, Submit, TextField } from "@/components/kit";
+import { Button, Select } from "@/components/ui";
 import { projectBundle } from "@/lib/domain";
 import { formatMoney } from "@/lib/engine/money";
 
@@ -26,7 +26,7 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
     <div className="space-y-4">
       <header>
         <h1 className="font-serif text-3xl">Presupuesto</h1>
-        <p className="text-sm text-stone-600">Directo {formatMoney(data.priced.direct)} · Indirecto {formatMoney(data.priced.indirect)} · Total {formatMoney(data.priced.total)}. Los auxiliares no se suman: entran en el rubro que los consume.</p>
+        <p className="text-sm text-muted-foreground">Directo {formatMoney(data.priced.direct)} · Indirecto {formatMoney(data.priced.indirect)} · Total {formatMoney(data.priced.total)}. Los auxiliares no se suman: entran en el rubro que los consume.</p>
       </header>
       <Notice message={query.aviso} />
       <div className="grid gap-4 xl:grid-cols-[16rem_1fr]">
@@ -64,8 +64,8 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
                       {editable ? (
                         <form action={moveAction} className="flex gap-1">
                           <input type="hidden" name="projectId" value={id} /><input type="hidden" name="table" value="project_rubros" /><input type="hidden" name="id" value={item.id} /><input type="hidden" name="parent" value="chapter_id" />
-                          <button name="direction" value="-1" className="text-xs">Subir</button>
-                          <button name="direction" value="1" className="text-xs">Bajar</button>
+                          <Button type="submit" name="direction" value="-1" variant="secondary" className="h-8 px-2">Subir</Button>
+                          <Button type="submit" name="direction" value="1" variant="secondary" className="h-8 px-2">Bajar</Button>
                         </form>
                       ) : null}
                     </td>
@@ -149,30 +149,63 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
           ) : null}
           {editable ? (
             <Panel title="Actualizar insumos">
-              <form action={priceToolsAction} className="grid gap-3 md:grid-cols-2">
+              <p className="mb-4 text-sm text-muted-foreground">Elija una operación. El botón usa solo los campos de esa operación.</p>
+              <form action={priceToolsAction} className="space-y-5">
                 <input type="hidden" name="projectId" value={id} />
                 <Field label="Operación">
-                  <Select name="tool">
+                  <Select name="tool" defaultValue="refresh">
                     <option value="refresh">Actualizar desde mantenimiento, personal o histórico</option>
                     <option value="bump">Incrementar un porcentaje</option>
                     <option value="replace">Reemplazar por código o nombre</option>
                     <option value="import">Traer capítulos de otra obra</option>
                   </Select>
                 </Field>
-                <Field label="Origen de precios"><Select name="source"><option value="maintenance">Precios actuales del esquema</option><option value="personal">Precios personales</option><option value="snapshot">Histórico</option></Select></Field>
-                <Field label="Histórico"><Select name="snapshotId"><option value="">Ninguno</option>{data.snapshots.map((item) => <option key={item.id} value={item.id}>{item.captured_on} · {item.note}</option>)}</Select></Field>
-                <TextField label="Porcentaje de incremento" name="percent" defaultValue="0" />
-                <TextField label="Familia del incremento" name="family" hint="material, labor, equipment o transport. Vacío aplica a todos." />
-                <TextField label="Buscar insumo" name="query" />
-                <Field label="Reemplazo"><Select name="catalogId"><option value="">Elegir</option>{data.materials.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></Field>
-                <input type="hidden" name="kind" value="material" />
-                <Field label="Obra de origen"><Select name="sourceId"><option value="">Elegir</option>{data.projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></Field>
-                <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="includeCatalog" value="si" /> Volcar rubros importados al catálogo</label>
-                <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="family" value="material" defaultChecked /> Material</label>
-                <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="family" value="labor" defaultChecked /> Mano de obra</label>
-                <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="family" value="equipment" defaultChecked /> Equipo</label>
-                <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="family" value="transport" defaultChecked /> Transporte</label>
-                <Submit>Aplicar</Submit>
+                <div>
+                  <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Actualizar precios</h3>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field label="Origen de precios"><Select name="source" defaultValue="maintenance"><option value="maintenance">Precios actuales del esquema</option><option value="personal">Precios personales</option><option value="snapshot">Histórico</option></Select></Field>
+                    <Field label="Histórico"><Select name="snapshotId" defaultValue=""><option value="">Ninguno</option>{data.snapshots.map((item) => <option key={item.id} value={item.id}>{item.captured_on} · {item.note}</option>)}</Select></Field>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <CheckChip name="family" value="material" label="Material" defaultChecked />
+                    <CheckChip name="family" value="labor" label="Mano de obra" defaultChecked />
+                    <CheckChip name="family" value="equipment" label="Equipo" defaultChecked />
+                    <CheckChip name="family" value="transport" label="Transporte" defaultChecked />
+                  </div>
+                </div>
+                <div>
+                  <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Incrementar</h3>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <TextField label="Porcentaje de incremento" name="percent" type="number" defaultValue="0" />
+                    <Field label="Familia del incremento" hint="Vacío aplica a todas.">
+                      <Select name="bumpFamily" defaultValue="">
+                        <option value="">Todas</option>
+                        <option value="material">Material</option>
+                        <option value="labor">Mano de obra</option>
+                        <option value="equipment">Equipo</option>
+                        <option value="transport">Transporte</option>
+                      </Select>
+                    </Field>
+                  </div>
+                </div>
+                <div>
+                  <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Reemplazar un insumo</h3>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <TextField label="Buscar por código o nombre" name="query" />
+                    <Field label="Material de reemplazo"><Select name="catalogId" defaultValue=""><option value="">Seleccione</option>{data.materials.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></Field>
+                  </div>
+                  <input type="hidden" name="kind" value="material" />
+                </div>
+                <div>
+                  <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Traer otra obra</h3>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field label="Obra de origen"><Select name="sourceId" defaultValue=""><option value="">Seleccione</option>{data.projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></Field>
+                    <div className="flex items-end"><CheckChip name="includeCatalog" value="si" label="Volcar los rubros importados al catálogo" /></div>
+                  </div>
+                </div>
+                <div className="border-t border-border pt-4">
+                  <Submit pending="Aplicando…">Aplicar operación</Submit>
+                </div>
               </form>
             </Panel>
           ) : null}

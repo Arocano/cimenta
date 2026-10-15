@@ -35,7 +35,7 @@ export default async function AdjustmentPage({ params, searchParams }: { params:
       </Panel>
       <Panel title="Cuadrilla tipo">
         <ul className="text-sm">{data.crew.map((row) => <li key={row.id}>{row.id}: peso {row.weight}</li>)}</ul>
-        {data.crew.length === 0 ? <p className="text-sm text-stone-500">Agregue mano de obra al presupuesto para calcular la cuadrilla.</p> : null}
+        {data.crew.length === 0 ? <p className="text-sm text-muted-foreground">Agregue mano de obra al presupuesto para calcular la cuadrilla.</p> : null}
       </Panel>
       <Panel title="Informe técnico">
         <form action={saveMemoAction} className="space-y-3">

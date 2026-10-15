@@ -881,6 +881,7 @@ export async function saveCatalog(table: TableName, id: string, data: Record<str
     if (id) await tx.update(table, id, row);
     else await tx.insert(table, row);
   });
+  clearCatalogCache(session.orgId);
 }
 
 export async function deleteCatalog(table: TableName, id: string) {
@@ -907,6 +908,7 @@ export async function deleteCatalog(table: TableName, id: string) {
     }
     await tx.remove(table, id);
   });
+  clearCatalogCache(session.orgId);
 }
 
 export async function linkSupplier(materialId: string, supplierId: string) {
@@ -915,6 +917,7 @@ export async function linkSupplier(materialId: string, supplierId: string) {
   await transaction(async (tx) => {
     await tx.insert("material_suppliers", { org_id: session.orgId, material_id: materialId, supplier_id: supplierId });
   });
+  clearCatalogCache(session.orgId);
 }
 
 export async function createSnapshot(note: string, families: string[]) {
@@ -938,6 +941,7 @@ export async function createSnapshot(note: string, families: string[]) {
       }
     }
   });
+  clearCatalogCache(session.orgId);
 }
 
 export async function purgeBase(families: string[], confirmation: string) {
@@ -965,6 +969,7 @@ export async function purgeBase(families: string[], confirmation: string) {
       for (const row of await tx.list(table, { org_id: session.orgId })) await tx.remove(table, row.id);
     }
   });
+  clearCatalogCache(session.orgId);
 }
 
 export async function recalculateFamily(family: "material" | "labor" | "equipment" | "transport", scheme: "chamber" | "personal") {
@@ -978,31 +983,61 @@ export async function recalculateFamily(family: "material" | "labor" | "equipmen
   });
 }
 
+type CatalogTables = {
+  units: Row[];
+  conversions: Row[];
+  cities: Row[];
+  suppliers: Row[];
+  materials: Row[];
+  links: Row[];
+  equipment: Row[];
+  labor: Row[];
+  transport: Row[];
+  chapters: Row[];
+  types: Row[];
+  rubros: Row[];
+  analysis: Row[];
+  snapshots: Row[];
+  snapshotLines: Row[];
+  cpc: Row[];
+  thresholds: Row[];
+};
+
+const catalogCache = new Map<string, { at: number; data: CatalogTables }>();
+
+export function clearCatalogCache(orgId: string) {
+  catalogCache.delete(orgId);
+}
+
 export async function orgCatalog() {
   const session = await requireSession();
-  return transaction(async (tx) => {
+  const cached = catalogCache.get(session.orgId);
+  if (cached && Date.now() - cached.at < 30_000) return { session, ...cached.data };
+  const data = await transaction(async (tx) => {
     const org = session.orgId;
-    return {
-      session,
-      units: await tx.list("units", { org_id: org }),
-      conversions: await tx.list("unit_conversions", { org_id: org }),
-      cities: await tx.list("cities", { org_id: org }),
-      suppliers: await tx.list("suppliers", { org_id: org }),
-      materials: await tx.list("materials", { org_id: org }),
-      links: await tx.list("material_suppliers", { org_id: org }),
-      equipment: await tx.list("equipment", { org_id: org }),
-      labor: await tx.list("labor_categories", { org_id: org }),
-      transport: await tx.list("transport_rates", { org_id: org }),
-      chapters: await tx.list("catalog_chapters", { org_id: org }),
-      types: await tx.list("rubro_types", { org_id: org }),
-      rubros: await tx.list("catalog_rubros", { org_id: org }),
-      analysis: await tx.list("catalog_apu_lines", { org_id: org }),
-      snapshots: await tx.list("price_snapshots", { org_id: org }),
-      snapshotLines: await tx.list("price_snapshot_lines", { org_id: org }),
-      cpc: await tx.list("cpc_codes", { org_id: org }),
-      thresholds: await tx.list("vae_thresholds", { org_id: org }),
-    };
+    const [units, conversions, cities, suppliers, materials, links, equipment, labor, transport, chapters, types, rubros, analysis, snapshots, snapshotLines, cpc, thresholds] = await Promise.all([
+      tx.list("units", { org_id: org }),
+      tx.list("unit_conversions", { org_id: org }),
+      tx.list("cities", { org_id: org }),
+      tx.list("suppliers", { org_id: org }),
+      tx.list("materials", { org_id: org }),
+      tx.list("material_suppliers", { org_id: org }),
+      tx.list("equipment", { org_id: org }),
+      tx.list("labor_categories", { org_id: org }),
+      tx.list("transport_rates", { org_id: org }),
+      tx.list("catalog_chapters", { org_id: org }),
+      tx.list("rubro_types", { org_id: org }),
+      tx.list("catalog_rubros", { org_id: org }),
+      tx.list("catalog_apu_lines", { org_id: org }),
+      tx.list("price_snapshots", { org_id: org }),
+      tx.list("price_snapshot_lines", { org_id: org }),
+      tx.list("cpc_codes", { org_id: org }),
+      tx.list("vae_thresholds", { org_id: org }),
+    ]);
+    return { units, conversions, cities, suppliers, materials, links, equipment, labor, transport, chapters, types, rubros, analysis, snapshots, snapshotLines, cpc, thresholds };
   });
+  catalogCache.set(session.orgId, { at: Date.now(), data });
+  return { session, ...data };
 }
 
 export async function addContributor(projectId: string, input: Record<string, string>) {

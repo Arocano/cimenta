@@ -474,7 +474,7 @@ export async function priceToolsAction(form: FormData) {
   try {
     const tool = text(form, "tool");
     if (tool === "refresh") await refreshPrices(projectId, text(form, "source"), text(form, "snapshotId"), form.getAll("family").map(String));
-    if (tool === "bump") await bumpPrices(projectId, text(form, "percent") || "0", text(form, "family"));
+    if (tool === "bump") await bumpPrices(projectId, text(form, "percent") || "0", text(form, "bumpFamily"));
     if (tool === "replace") await replaceInput(projectId, text(form, "query"), text(form, "kind"), text(form, "catalogId"));
     if (tool === "import") await importFromProject(projectId, text(form, "sourceId"), text(form, "includeCatalog") === "si");
     redirect(`/obras/${projectId}/presupuesto?aviso=${encodeURIComponent("Precios actualizados.")}`);

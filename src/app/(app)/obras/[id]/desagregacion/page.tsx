@@ -12,7 +12,7 @@ export default async function DisaggregationPage({ params }: { params: Promise<{
     <div className="space-y-4">
       <h1 className="font-serif text-3xl">Desagregación tecnológica</h1>
       <p className="text-sm">VAE de la obra: {formatMoney(data.priced.vaePercent)}%. EP aporta 100 %, ND 40 % y NP 0 %. {data.threshold ? `Umbral ${data.threshold.name}: ${data.threshold.percent}%. ${data.vaeOk ? "La obra alcanza el umbral de trabajo." : "La obra no alcanza el umbral. Revise origen o composición."}` : "No hay umbral cargado."}</p>
-      <p className="text-sm text-stone-600">{data.threshold?.note} Cimenta calcula y reporta; no declara el VAE ante el SERCOP.</p>
+      <p className="text-sm text-muted-foreground">{data.threshold?.note} Cimenta calcula y reporta; no declara el VAE ante el SERCOP.</p>
       <Panel title="Componentes">
         <DataTable headers={["Rubro", "Insumo", "Origen", "CPC", "Costo", ""]}>
           {data.rubros.filter((rubro) => !rubro.is_auxiliary).flatMap((rubro) => data.lines.filter((line) => line.rubro_id === rubro.id).map((line) => {

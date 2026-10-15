@@ -1,5 +1,6 @@
 import { movementAction, removeMovementAction } from "@/app/actions";
-import { DataTable, Money, Panel, Submit, TextField } from "@/components/kit";
+import { ConfirmForm } from "@/components/confirm-form";
+import { DataTable, Field, Money, Panel, Submit, TextField } from "@/components/kit";
 import { Select } from "@/components/ui";
 import { projectBundle } from "@/lib/domain";
 import { dec, formatMoney } from "@/lib/engine/money";
@@ -52,22 +53,43 @@ export default async function WarehousePage({ params, searchParams }: { params: 
               <td className="px-2 py-2"><Money value={move.unit_price} /></td>
               <td className="px-2 py-2">{move.invoice}</td>
               <td className="px-2 py-2">{move.supplier_name}</td>
-              <td className="px-2 py-2">{canWrite ? <form action={removeMovementAction}><input type="hidden" name="projectId" value={id} /><input type="hidden" name="id" value={move.id} /><button className="text-xs text-red-800">Quitar</button></form> : null}</td>
+              <td className="px-2 py-2">{canWrite ? (
+                <ConfirmForm action={removeMovementAction} message="¿Quitar este movimiento de bodega?">
+                  <input type="hidden" name="projectId" value={id} />
+                  <input type="hidden" name="id" value={move.id} />
+                  <Submit variant="danger" pending="Quitando…" className="h-9">Quitar</Submit>
+                </ConfirmForm>
+              ) : null}</td>
             </tr>
           ))}
         </DataTable>
         {canWrite ? (
-          <form action={movementAction} className="mt-4 grid gap-3 md:grid-cols-4">
+          <form action={movementAction} className="mt-4 space-y-4 border-t border-border pt-4">
+            <h3 className="text-sm font-medium">Registrar movimiento</h3>
             <input type="hidden" name="projectId" value={id} />
-            <label className="text-sm">Tipo<Select name="kind"><option value="in">Ingreso contra el análisis</option><option value="out">Salida al rubro ejecutado</option></Select></label>
-            <TextField label="Material" name="material_name" required />
-            <label className="text-sm">Rubro<Select name="rubro_id">{data.rubros.map((rubro) => <option key={rubro.id} value={rubro.id}>{rubro.name}</option>)}</Select></label>
-            <TextField label="Cantidad" name="quantity" required />
-            <TextField label="Precio" name="unit_price" />
-            <TextField label="Factura" name="invoice" />
-            <TextField label="Proveedor" name="supplier_name" />
-            <TextField label="Fecha" name="movement_date" type="date" />
-            <Submit>Registrar</Submit>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="Tipo" required>
+                <Select name="kind" defaultValue="in">
+                  <option value="in">Ingreso contra el análisis</option>
+                  <option value="out">Salida al rubro ejecutado</option>
+                </Select>
+              </Field>
+              <TextField label="Fecha" name="movement_date" type="date" />
+              <TextField label="Material" name="material_name" required placeholder="Como figura en el análisis" />
+              <Field label="Rubro" required>
+                <Select name="rubro_id" required defaultValue="">
+                  <option value="">Seleccione</option>
+                  {data.rubros.map((rubro) => <option key={rubro.id} value={rubro.id}>{rubro.name}</option>)}
+                </Select>
+              </Field>
+              <TextField label="Cantidad" name="quantity" type="number" required />
+              <TextField label="Precio unitario" name="unit_price" type="number" />
+              <TextField label="Factura" name="invoice" />
+              <TextField label="Proveedor" name="supplier_name" />
+            </div>
+            <div className="border-t border-border pt-4">
+              <Submit pending="Registrando…">Registrar movimiento</Submit>
+            </div>
           </form>
         ) : null}
       </Panel>

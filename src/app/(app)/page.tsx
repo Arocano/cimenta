@@ -12,7 +12,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
     <div className="space-y-4">
       <header>
         <h1 className="font-serif text-3xl">Obras</h1>
-        <p className="text-sm text-stone-600">Cada obra concentra el presupuesto, el tiempo y el control de ejecución.</p>
+        <p className="text-sm text-muted-foreground">Cada obra concentra el presupuesto, el tiempo y el control de ejecución.</p>
       </header>
       <Notice message={query.aviso} />
       <form className="no-print flex gap-2">
@@ -22,12 +22,12 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
         <Panel title="Listado">
           <div className="divide-y divide-border">
-            {projects.length === 0 ? <p className="text-sm text-stone-500">Todavía no hay obras.</p> : null}
+            {projects.length === 0 ? <p className="text-sm text-muted-foreground">Todavía no hay obras.</p> : null}
             {projects.map((project) => (
               <div key={project.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
                 <div>
                   <Link href={`/obras/${project.id}`} className="font-medium hover:underline">{project.name}</Link>
-                  <p className="text-xs text-stone-500"><DateText value={project.proposed_date} /></p>
+                  <p className="text-xs text-muted-foreground"><DateText value={project.proposed_date} /></p>
                 </div>
                 <div className="flex gap-2">
                   <Link href={`/obras/${project.id}/presupuesto`} className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground">Abrir</Link>

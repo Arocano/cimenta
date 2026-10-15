@@ -26,12 +26,27 @@ export default async function SchedulePage({ params, searchParams }: { params: P
       </div>
       <Panel title="Calendario laboral">
         {data.calendars.map((calendar) => (
-          <form key={calendar.id} action={calendarAction} className="mb-3 grid gap-2 md:grid-cols-8">
+          <form key={calendar.id} action={calendarAction} className="mb-4 space-y-4">
             <input type="hidden" name="projectId" value={id} /><input type="hidden" name="calendarId" value={calendar.id} />
-            <TextField label="Nombre" name="name" defaultValue={calendar.name} />
-            {(["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const).map((day) => <TextField key={day} label={day} name={day} defaultValue={calendar[day]} />)}
-            <TextField label="Inicio" name="work_start" type="date" defaultValue={data.project.work_start} />
-            {editable ? <Submit>Usar calendario</Submit> : null}
+            <div className="grid gap-4 md:grid-cols-2">
+              <TextField label="Nombre" name="name" defaultValue={calendar.name} />
+              <TextField label="Inicio de obra" name="work_start" type="date" defaultValue={data.project.work_start} />
+            </div>
+            <div>
+              <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Horas por día</h3>
+              <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
+                {([
+                  ["mon", "Lunes"],
+                  ["tue", "Martes"],
+                  ["wed", "Miércoles"],
+                  ["thu", "Jueves"],
+                  ["fri", "Viernes"],
+                  ["sat", "Sábado"],
+                  ["sun", "Domingo"],
+                ] as const).map(([day, label]) => <TextField key={day} label={label} name={day} type="number" defaultValue={calendar[day]} />)}
+              </div>
+            </div>
+            {editable ? <div className="border-t border-border pt-4"><Submit pending="Guardando…">Guardar calendario</Submit></div> : null}
           </form>
         ))}
         {editable ? (
@@ -95,7 +110,7 @@ export default async function SchedulePage({ params, searchParams }: { params: P
             </div>
           );
         })}
-        <p className="mb-2 text-sm text-stone-600">Consulta por componente: cada insumo permanece en su rubro o grupo, sin edición en esta vista.</p>
+        <p className="mb-2 text-sm text-muted-foreground">Consulta por componente: cada insumo permanece en su rubro o grupo, sin edición en esta vista.</p>
         <ul className="mb-4 text-sm">{data.lines.slice(0, 12).map((line) => <li key={line.id}>{line.name} · {data.rubros.find((rubro) => rubro.id === line.rubro_id)?.name}</li>)}</ul>
         <InvestmentChart points={data.curve.map((point) => ({ label: point.label, amount: Number(point.amount), cumulative: Number(point.cumulative) }))} />
       </Panel>
