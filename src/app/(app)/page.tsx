@@ -1,4 +1,5 @@
 import { copyProjectAction, createProjectAction, deleteProjectAction, importExcelAction } from "@/app/actions";
+import { ExcelFileField } from "@/components/excel-file-field";
 import { DateText, Notice, Panel, Submit, TextField } from "@/components/kit";
 import { listVisibleProjects } from "@/lib/domain";
 import { todayIso } from "@/lib/engine/money";
@@ -43,7 +44,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
           </div>
         </Panel>
         {canEdit ? (
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             <Panel title="Nueva obra">
               <form action={createProjectAction} className="space-y-3">
                 <TextField label="Nombre" name="name" required hint="El nombre es obligatorio." />
@@ -54,7 +55,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
             <Panel title="Presupuesto desde Excel">
               <form action={importExcelAction} className="space-y-3">
                 <TextField label="Nombre de la obra" name="name" />
-                <input name="file" type="file" accept=".xlsx" required className="text-sm" />
+                <ExcelFileField />
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="includeCatalog" value="si" /> Incluir rubros en el catálogo general</label>
                 <a className="block text-sm text-primary underline" href="/api/plantilla">Descargar plantilla</a>
                 <Submit variant="secondary">Importar</Submit>
