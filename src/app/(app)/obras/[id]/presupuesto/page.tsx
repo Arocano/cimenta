@@ -1,5 +1,6 @@
 import { addChapterAction, addLineAction, addRubroAction, moveAction, priceToolsAction, removeBudgetAction, updateLineAction, updateRubroAction } from "@/app/actions";
 import { CheckChip, DataTable, Field, Money, Notice, Panel, Submit, TextField } from "@/components/kit";
+import { SavingForm } from "@/components/saving-form";
 import { Button, Select } from "@/components/ui";
 import { projectBundle } from "@/lib/domain";
 import { formatMoney } from "@/lib/engine/money";
@@ -7,7 +8,7 @@ import { formatMoney } from "@/lib/engine/money";
 export default async function BudgetPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ aviso?: string; capitulo?: string; rubro?: string; q?: string }> }) {
   const { id } = await params;
   const query = await searchParams;
-  const data = await projectBundle(id);
+  const data = await projectBundle(id, "presupuesto");
   const editable = data.session.role === "admin" || data.session.role === "presupuestador";
   const needle = (query.q ?? "").trim().toLowerCase();
   const chapter = data.chapters.find((item) => item.id === query.capitulo) ?? data.chapters[0];
@@ -40,11 +41,11 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
             ))}
           </div>
           {editable ? (
-            <form action={addChapterAction} className="mt-4 space-y-2">
+            <SavingForm action={addChapterAction} className="mt-4 space-y-2">
               <input type="hidden" name="projectId" value={id} />
               <TextField label="Nuevo capítulo" name="name" required />
               <Submit>Agregar</Submit>
-            </form>
+            </SavingForm>
           ) : null}
         </Panel>
         <div className="space-y-4">
@@ -62,11 +63,11 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
                     <td className="px-2 py-2"><Money value={price?.total ?? 0} /></td>
                     <td className="px-2 py-2">
                       {editable ? (
-                        <form action={moveAction} className="flex gap-1">
+                        <SavingForm action={moveAction} className="flex gap-1">
                           <input type="hidden" name="projectId" value={id} /><input type="hidden" name="table" value="project_rubros" /><input type="hidden" name="id" value={item.id} /><input type="hidden" name="parent" value="chapter_id" />
                           <Button type="submit" name="direction" value="-1" variant="secondary" className="h-8 px-2">Subir</Button>
                           <Button type="submit" name="direction" value="1" variant="secondary" className="h-8 px-2">Bajar</Button>
-                        </form>
+                        </SavingForm>
                       ) : null}
                     </td>
                   </tr>
@@ -75,13 +76,13 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
             </DataTable>
             {editable && chapter ? (
               <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <form action={addRubroAction} className="space-y-2">
+                <SavingForm action={addRubroAction} className="space-y-2">
                   <input type="hidden" name="projectId" value={id} /><input type="hidden" name="chapterId" value={chapter.id} />
                   <Field label="Desde el catálogo"><Select name="catalogId"><option value="">Crear en blanco</option>{data.catalogRubros.map((item) => <option key={item.id} value={item.id}>{item.code} {item.name}</option>)}</Select></Field>
                   <TextField label="Nombre, si no usa catálogo" name="name" />
                   <TextField label="Unidad" name="unit" defaultValue="m3" />
                   <Submit>Agregar rubro</Submit>
-                </form>
+                </SavingForm>
               </div>
             ) : null}
           </Panel>
@@ -90,7 +91,7 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
               <p className="mb-3 text-sm">Equipo <Money value={priced?.components.equipment ?? 0} /> · Mano de obra <Money value={priced?.components.labor ?? 0} /> · Material <Money value={priced?.components.material ?? 0} /> · Transporte <Money value={priced?.components.transport ?? 0} /> · Herramienta menor <Money value={priced?.components.minorTool ?? 0} /></p>
               <p className="mb-3 text-sm">Costo directo <Money value={priced?.direct ?? 0} /> · Indirecto <Money value={priced?.indirect ?? 0} /> · Precio unitario <Money value={priced?.unitPrice ?? 0} /> · Total <Money value={priced?.total ?? 0} /></p>
               {editable ? (
-                <form action={updateRubroAction} className="mb-4 grid gap-3 md:grid-cols-4">
+                <SavingForm action={updateRubroAction} className="mb-4 grid gap-3 md:grid-cols-4">
                   <input type="hidden" name="projectId" value={id} /><input type="hidden" name="id" value={rubro.id} /><input type="hidden" name="chapterId" value={chapter?.id} />
                   <TextField label="Código" name="code" defaultValue={rubro.code} />
                   <TextField label="Nombre" name="name" defaultValue={rubro.name} required />
@@ -103,7 +104,7 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
                   <Field label="Auxiliar"><Select name="is_auxiliary" defaultValue={rubro.is_auxiliary ? "si" : "no"}><option value="no">No</option><option value="si">Sí, un solo nivel</option></Select></Field>
                   <Field label="Origen si es subcontrato"><Select name="origin" defaultValue={rubro.origin}><option>EP</option><option>NP</option><option>ND</option></Select></Field>
                   <div className="flex items-end gap-2"><Submit>Guardar rubro</Submit></div>
-                </form>
+                </SavingForm>
               ) : null}
               <DataTable headers={["Tipo", "Insumo", "Cantidad", "Precio", "Costo", "Origen", "CPC", ""]}>
                 {lines.map((line) => {
@@ -114,7 +115,7 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
                       <td className="px-2 py-2">{line.name}</td>
                       <td className="px-2 py-2" colSpan={6}>
                         {editable ? (
-                          <form action={updateLineAction} className="flex flex-wrap items-center gap-2">
+                          <SavingForm action={updateLineAction} className="flex flex-wrap items-center gap-2">
                             <input type="hidden" name="projectId" value={id} /><input type="hidden" name="id" value={line.id} /><input type="hidden" name="chapterId" value={chapter?.id} /><input type="hidden" name="rubroId" value={rubro.id} />
                             <input name="quantity" defaultValue={line.quantity} className="h-8 w-24 rounded border px-2 text-sm" />
                             <input name="unit_price" defaultValue={line.unit_price} className="h-8 w-24 rounded border px-2 text-sm" />
@@ -122,7 +123,7 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
                             <Select name="origin" defaultValue={line.origin} className="w-20"><option>EP</option><option>NP</option><option>ND</option></Select>
                             <input name="cpc_code" defaultValue={line.cpc_code} className="h-8 w-28 rounded border px-2 text-sm" />
                             <Submit variant="secondary">Actualizar</Submit>
-                          </form>
+                          </SavingForm>
                         ) : <span><Money value={cost?.cost ?? 0} /></span>}
                       </td>
                     </tr>
@@ -130,7 +131,7 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
                 })}
               </DataTable>
               {editable ? (
-                <form action={addLineAction} className="mt-4 grid gap-3 md:grid-cols-4">
+                <SavingForm action={addLineAction} className="mt-4 grid gap-3 md:grid-cols-4">
                   <input type="hidden" name="projectId" value={id} /><input type="hidden" name="chapterId" value={chapter?.id} /><input type="hidden" name="rubroId" value={rubro.id} />
                   <Field label="Insumo del catálogo o auxiliar"><Select name="ref"><option value="">Escribir uno nuevo</option>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</Select></Field>
                   <TextField label="Nombre manual" name="name" />
@@ -140,17 +141,17 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
                   <Field label="Origen"><Select name="origin"><option>EP</option><option>ND</option><option>NP</option></Select></Field>
                   <TextField label="CPC" name="cpc_code" />
                   <div className="flex items-end"><Submit>Agregar insumo</Submit></div>
-                </form>
+                </SavingForm>
               ) : null}
               {editable ? (
-                <form action={removeBudgetAction} className="mt-3"><input type="hidden" name="projectId" value={id} /><input type="hidden" name="table" value="project_rubros" /><input type="hidden" name="id" value={rubro.id} /><Submit variant="danger">Eliminar rubro</Submit></form>
+                <SavingForm action={removeBudgetAction} className="mt-3"><input type="hidden" name="projectId" value={id} /><input type="hidden" name="table" value="project_rubros" /><input type="hidden" name="id" value={rubro.id} /><Submit variant="danger">Eliminar rubro</Submit></SavingForm>
               ) : null}
             </Panel>
           ) : null}
           {editable ? (
             <Panel title="Actualizar insumos">
               <p className="mb-4 text-sm text-muted-foreground">Elija una operación. El botón usa solo los campos de esa operación.</p>
-              <form action={priceToolsAction} className="space-y-5">
+              <SavingForm action={priceToolsAction} className="space-y-5">
                 <input type="hidden" name="projectId" value={id} />
                 <Field label="Operación">
                   <Select name="tool" defaultValue="refresh">
@@ -206,7 +207,7 @@ export default async function BudgetPage({ params, searchParams }: { params: Pro
                 <div className="border-t border-border pt-4">
                   <Submit pending="Aplicando…">Aplicar operación</Submit>
                 </div>
-              </form>
+              </SavingForm>
             </Panel>
           ) : null}
         </div>

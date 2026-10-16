@@ -1,5 +1,6 @@
 import { saveMemoAction, saveSymbolAction } from "@/app/actions";
 import { DataTable, Notice, Panel, Submit } from "@/components/kit";
+import { SavingForm } from "@/components/saving-form";
 import { Textarea } from "@/components/ui";
 import { projectBundle } from "@/lib/domain";
 import { formatMoney } from "@/lib/engine/money";
@@ -7,7 +8,7 @@ import { formatMoney } from "@/lib/engine/money";
 export default async function AdjustmentPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ aviso?: string }> }) {
   const { id } = await params;
   const query = await searchParams;
-  const data = await projectBundle(id);
+  const data = await projectBundle(id, "reajuste");
   const editable = data.session.role === "admin" || data.session.role === "presupuestador";
   return (
     <div className="space-y-4">
@@ -19,7 +20,7 @@ export default async function AdjustmentPage({ params, searchParams }: { params:
           {data.symbols.map((symbol) => (
             <tr key={symbol.id} className="border-b border-border">
               <td className="px-2 py-2" colSpan={6}>
-                <form action={saveSymbolAction} className="flex flex-wrap items-center gap-2">
+                <SavingForm action={saveSymbolAction} className="flex flex-wrap items-center gap-2">
                   <input type="hidden" name="projectId" value={id} /><input type="hidden" name="symbolId" value={symbol.id} />
                   <span className="w-40">{symbol.code} · {symbol.name}</span>
                   <span className="w-24 tabular-nums">{data.weights.find((item) => item.id === symbol.id)?.weight}</span>
@@ -27,7 +28,7 @@ export default async function AdjustmentPage({ params, searchParams }: { params:
                   <input name="base" defaultValue={data.indices.find((item) => item.symbol_id === symbol.id && item.kind === "base")?.value} className="h-8 w-24 rounded border px-2" />
                   <input name="period" defaultValue={data.indices.find((item) => item.symbol_id === symbol.id && item.kind === "period")?.value} className="h-8 w-24 rounded border px-2" />
                   {editable ? <Submit variant="secondary">Guardar</Submit> : null}
-                </form>
+                </SavingForm>
               </td>
             </tr>
           ))}
@@ -38,11 +39,11 @@ export default async function AdjustmentPage({ params, searchParams }: { params:
         {data.crew.length === 0 ? <p className="text-sm text-muted-foreground">Agregue mano de obra al presupuesto para calcular la cuadrilla.</p> : null}
       </Panel>
       <Panel title="Informe técnico">
-        <form action={saveMemoAction} className="space-y-3">
+        <SavingForm action={saveMemoAction} className="space-y-3">
           <input type="hidden" name="projectId" value={id} />
           <Textarea name="body" defaultValue={String(data.memo?.body ?? "")} placeholder="Datos del informe asociado al reajuste" />
           {editable ? <Submit>Guardar informe y cuadrilla</Submit> : null}
-        </form>
+        </SavingForm>
       </Panel>
     </div>
   );

@@ -265,35 +265,145 @@ function toCost(project: Project, rubros: ProjectRubro[], lines: ProjectLine[]):
   }));
 }
 
-export async function projectBundle(projectId: string) {
+export type ProjectView = "datos" | "presupuesto" | "indirectos" | "desagregacion" | "reajuste" | "cronograma" | "bodega" | "planillas" | "reportes" | "completo";
+
+const BUNDLE_TTL = 120_000;
+const bundleCache = new Map<string, { at: number; data: Awaited<ReturnType<typeof loadProject>> }>();
+const bundleInflight = new Map<string, Promise<Awaited<ReturnType<typeof loadProject>>>>();
+
+export function clearProjectCache(projectId?: string) {
+  if (!projectId) {
+    bundleCache.clear();
+    return;
+  }
+  for (const key of bundleCache.keys()) {
+    if (key.startsWith(`${projectId}:`)) bundleCache.delete(key);
+  }
+}
+
+function bundleNeeds(view: ProjectView) {
+  const all = view === "completo";
+  return {
+    chapters: all || view === "presupuesto" || view === "cronograma" || view === "reportes",
+    indirects: all || view === "indirectos",
+    advances: all || view === "indirectos" || view === "planillas",
+    adjustment: all || view === "reajuste" || view === "planillas",
+    schedule: all || view === "cronograma",
+    warehouse: all || view === "bodega",
+    planillas: all || view === "planillas",
+    contributors: all || view === "datos",
+    thresholds: all || view === "datos" || view === "desagregacion",
+    cpc: all || view === "desagregacion",
+    catalog: all || view === "presupuesto",
+    memo: all || view === "reajuste",
+    crew: all || view === "reajuste",
+  };
+}
+
+function take<T>(tx: Tx, enabled: boolean, table: TableName, filters: Record<string, string>) {
+  if (!enabled) return Promise.resolve([] as T[]);
+  return tx.list(table, filters).then((rows) => as<T>(rows));
+}
+
+export async function projectBundle(projectId: string, view: ProjectView = "completo", options?: { fresh?: boolean }) {
   const session = await requireSession();
+  const key = `${projectId}:${view}`;
+  if (!options?.fresh) {
+    const exact = bundleCache.get(key);
+    const full = view === "completo" ? undefined : bundleCache.get(`${projectId}:completo`);
+    const hit = exact && Date.now() - exact.at < BUNDLE_TTL ? exact : full && Date.now() - full.at < BUNDLE_TTL ? full : undefined;
+    if (hit) return { ...hit.data, session };
+    const pending = bundleInflight.get(key);
+    if (pending) return { ...(await pending), session };
+  }
+  const pending = loadProject(session, projectId, view);
+  if (!options?.fresh) bundleInflight.set(key, pending);
+  try {
+    const data = await pending;
+    if (!options?.fresh) bundleCache.set(key, { at: Date.now(), data });
+    return { ...data, session };
+  } finally {
+    bundleInflight.delete(key);
+  }
+}
+
+function projectTables(need: ReturnType<typeof bundleNeeds>): TableName[] {
+  const tables: TableName[] = ["project_rubros", "project_apu_lines"];
+  if (need.chapters) tables.push("project_chapters");
+  if (need.indirects) tables.push("indirect_items");
+  if (need.advances) tables.push("contract_advances");
+  if (need.adjustment) tables.push("adjustment_symbols", "polynomial_terms", "price_indices");
+  if (need.schedule) tables.push("work_calendars", "schedule_groups", "schedule_tasks", "valued_periods", "valued_allocations");
+  if (need.warehouse) tables.push("warehouse_movements");
+  if (need.planillas) tables.push("deductions", "payment_certificates", "certificate_lines");
+  if (need.contributors) tables.push("contributors");
+  if (need.memo) tables.push("adjustment_memos");
+  return tables;
+}
+
+async function loadProject(session: Session, projectId: string, view: ProjectView) {
+  const need = bundleNeeds(view);
   return transaction(async (tx) => {
-    const project = await ownedProject(tx, session, projectId);
-    const chapters = sortBy(as<ProjectChapter>(await tx.list("project_chapters", { project_id: projectId })));
-    const rubros = sortBy(as<ProjectRubro>(await tx.list("project_rubros", { project_id: projectId })));
-    const lines = as<ProjectLine>(await tx.list("project_apu_lines", { project_id: projectId }));
+    const oid = { org_id: session.orgId };
+    const [graph, thresholdRows, cpcRows, catalogRubroRows, materialRows, laborCatalog, equipmentRows, transportRows, snapshotRows, orgProjects] = await Promise.all([
+      tx.projectGraph(projectId, session.orgId, projectTables(need)),
+      take<VaeThreshold>(tx, need.thresholds, "vae_thresholds", oid),
+      take<Row>(tx, need.cpc, "cpc_codes", oid),
+      take<CatalogRubro>(tx, need.catalog, "catalog_rubros", oid),
+      take<Material>(tx, need.catalog, "materials", oid),
+      take<LaborCategory>(tx, need.catalog, "labor_categories", oid),
+      take<Equipment>(tx, need.catalog, "equipment", oid),
+      take<TransportRate>(tx, need.catalog, "transport_rates", oid),
+      take<PriceSnapshot>(tx, need.catalog, "price_snapshots", oid),
+      take<Project>(tx, need.catalog, "projects", oid),
+    ]);
+    if (!graph || !canSee(session, graph.project.id)) throw new AppError("No tiene acceso a esta obra.");
+    const project = graph.project as Project;
+    const rows = graph.rows;
+    const chapterRows = as<ProjectChapter>(rows.project_chapters ?? []);
+    const rubroRows = as<ProjectRubro>(rows.project_rubros ?? []);
+    const lineRows = as<ProjectLine>(rows.project_apu_lines ?? []);
+    const indirectRows = as<IndirectItemRow>(rows.indirect_items ?? []);
+    const advanceRows = as<ContractAdvance>(rows.contract_advances ?? []);
+    const symbolRows = as<AdjustmentSymbol>(rows.adjustment_symbols ?? []);
+    const termRows = as<PolynomialTerm>(rows.polynomial_terms ?? []);
+    const indexRows = as<PriceIndex>(rows.price_indices ?? []);
+    const calendarRows = as<WorkCalendar>(rows.work_calendars ?? []);
+    const groupRows = as<ScheduleGroup>(rows.schedule_groups ?? []);
+    const taskRows = as<ScheduleTask>(rows.schedule_tasks ?? []);
+    const periodRows = as<ValuedPeriod>(rows.valued_periods ?? []);
+    const allocationRows = as<ValuedAllocation>(rows.valued_allocations ?? []);
+    const movementRows = as<WarehouseMovement>(rows.warehouse_movements ?? []);
+    const deductionRows = as<Deduction>(rows.deductions ?? []);
+    const certificateRows = as<PaymentCertificate>(rows.payment_certificates ?? []);
+    const certificateLineRows = as<CertificateLine>(rows.certificate_lines ?? []);
+    const contributorRows = as<Contributor>(rows.contributors ?? []);
+    const memoRows = as<{ body: string }>(rows.adjustment_memos ?? []);
+    const chapters = sortBy(chapterRows);
+    const rubros = sortBy(rubroRows);
+    const lines = lineRows;
     const priced = priceBudget(toCost(project, rubros, lines), {
       yieldMode: project.yield_mode,
       minorToolMode: project.minor_tool_mode,
       minorToolPercent: project.minor_tool_percent,
       indirectPercent: project.indirect_percent,
     });
-    const indirects = sortBy(as<IndirectItemRow>(await tx.list("indirect_items", { project_id: projectId })));
+    const indirects = sortBy(indirectRows);
     const indirectInput: IndirectItem[] = indirects.map((item) => ({
       id: item.id, group: item.group_name, name: item.name, enabled: item.enabled, mode: item.mode,
       monthlyCost: item.monthly_cost, months: item.months, directTotal: item.direct_total, percent: item.percent,
       advancePercent: item.advance_percent, premiumPercent: item.premium_percent, guaranteePercent: item.guarantee_percent,
     }));
-    const advances = as<ContractAdvance>(await tx.list("contract_advances", { project_id: projectId }));
+    const advances = advanceRows;
     const indirectResult = priceIndirects(indirectInput, {
       direct: priced.direct,
       contract: priced.total,
       readjustment: "0",
       capital: advances.reduce((sum, row) => sum.plus(dec(row.amount)), dec(0)).toFixed(6),
     });
-    const symbols = sortBy(as<AdjustmentSymbol>(await tx.list("adjustment_symbols", { project_id: projectId })));
-    const terms = as<PolynomialTerm>(await tx.list("polynomial_terms", { project_id: projectId }));
-    const indices = as<PriceIndex>(await tx.list("price_indices", { project_id: projectId }));
+    const symbols = sortBy(symbolRows);
+    const terms = termRows;
+    const indices = indexRows;
     const weights = symbolWeights(symbols.map((symbol) => ({ id: symbol.id, amount: symbolAmount(symbol, priced, lines, rubros) })), priced.direct);
     const polynomial = polynomialFactor(terms.map((term) => ({
       coefficient: term.coefficient,
@@ -306,12 +416,13 @@ export async function projectBundle(projectId: string) {
     });
     const mergedLabor = new Map<string, ReturnType<typeof dec>>();
     for (const row of laborRows) mergedLabor.set(row.id, (mergedLabor.get(row.id) ?? dec(0)).plus(dec(row.amount)));
-    const crew = crewWeights([...mergedLabor.entries()].map(([id, amount]) => ({ id, amount: amount.toFixed(6) })));
-    const calendars = as<WorkCalendar>(await tx.list("work_calendars", { project_id: projectId }));
-    const groups = sortBy(as<ScheduleGroup>(await tx.list("schedule_groups", { project_id: projectId })));
-    const tasks = as<ScheduleTask>(await tx.list("schedule_tasks", { project_id: projectId }));
-    const periods = sortBy(as<ValuedPeriod>(await tx.list("valued_periods", { project_id: projectId })).map((period) => ({ ...period, name: period.name })));
-    const allocations = as<ValuedAllocation>(await tx.list("valued_allocations", { project_id: projectId }));
+    const crew = need.crew ? crewWeights([...mergedLabor.entries()].map(([id, amount]) => ({ id, amount: amount.toFixed(6) }))) : [];
+    const calendars = calendarRows;
+    const synced = view === "cronograma" ? await syncSchedule(tx, session, project, chapters, groupRows, taskRows, rubros) : { groups: groupRows, tasks: taskRows };
+    const groups = sortBy(synced.groups);
+    const tasks = synced.tasks;
+    const periods = sortBy(periodRows.map((period) => ({ ...period, name: period.name })));
+    const allocations = allocationRows;
     const calendar = calendars.find((item) => item.id === project.calendar_id) ?? calendars[0];
     const hours = calendar ? [calendar.mon, calendar.tue, calendar.wed, calendar.thu, calendar.fri, calendar.sat, calendar.sun].map((value) => Number(value)) : [8, 8, 8, 8, 8, 0, 0];
     const curve = investmentCurve(
@@ -321,8 +432,8 @@ export async function projectBundle(projectId: string) {
         return { periodId: allocation.period_id, amount: programmedAmount(total, [allocation.percent]) };
       }),
     );
-    const threshold = as<VaeThreshold>(await tx.list("vae_thresholds", { org_id: session.orgId })).find((item) => item.id === project.vae_threshold_id);
-    const contributors = as<Contributor>(await tx.list("contributors", { project_id: projectId })).map((contributor) => ({
+    const threshold = thresholdRows.find((item) => item.id === project.vae_threshold_id);
+    const contributors = contributorRows.map((contributor) => ({
       ...contributor,
       shares: contributorShares(priced.components, {
         material: contributor.material_percent,
@@ -334,20 +445,20 @@ export async function projectBundle(projectId: string) {
     return {
       session, project, chapters, rubros, lines, priced, indirects, indirectResult, symbols, terms, indices, weights, polynomial, crew,
       calendars, groups, tasks, periods, allocations, hours, curve, threshold,
-      movements: as<WarehouseMovement>(await tx.list("warehouse_movements", { project_id: projectId })),
-      advances, deductions: as<Deduction>(await tx.list("deductions", { project_id: projectId })),
-      certificates: as<PaymentCertificate>(await tx.list("payment_certificates", { project_id: projectId })),
-      certificateLines: as<CertificateLine>(await tx.list("certificate_lines", { project_id: projectId })),
-      contributors, memo: (await tx.list("adjustment_memos", { project_id: projectId }))[0] ?? null,
-      catalogRubros: sortBy(as<CatalogRubro>(await tx.list("catalog_rubros", { org_id: session.orgId })).map((rubro) => ({ ...rubro, sort_order: 0 }))),
-      materials: as<Material>(await tx.list("materials", { org_id: session.orgId })),
-      labor: as<LaborCategory>(await tx.list("labor_categories", { org_id: session.orgId })),
-      equipment: as<Equipment>(await tx.list("equipment", { org_id: session.orgId })),
-      transport: as<TransportRate>(await tx.list("transport_rates", { org_id: session.orgId })),
-      cpc: await tx.list("cpc_codes", { org_id: session.orgId }),
-      thresholds: as<VaeThreshold>(await tx.list("vae_thresholds", { org_id: session.orgId })),
-      snapshots: as<PriceSnapshot>(await tx.list("price_snapshots", { org_id: session.orgId })),
-      projects: as<Project>(await tx.list("projects", { org_id: session.orgId })).filter((item) => canSee(session, item.id) && item.id !== projectId),
+      movements: movementRows,
+      advances, deductions: deductionRows,
+      certificates: certificateRows,
+      certificateLines: certificateLineRows,
+      contributors, memo: memoRows[0] ?? null,
+      catalogRubros: sortBy(catalogRubroRows.map((rubro) => ({ ...rubro, sort_order: 0 }))),
+      materials: materialRows,
+      labor: laborCatalog,
+      equipment: equipmentRows,
+      transport: transportRows,
+      cpc: cpcRows,
+      thresholds: thresholdRows,
+      snapshots: snapshotRows,
+      projects: orgProjects.filter((item) => canSee(session, item.id) && item.id !== projectId),
       indirectsMatch: indirectsMatch(project.indirect_percent, indirectResult.percent),
       vaeOk: threshold ? meetsVaeThreshold(priced.vaePercent, threshold.percent) : true,
       hoursPerUnit,
@@ -613,27 +724,38 @@ export async function saveMemo(projectId: string, body: string) {
   });
 }
 
+async function syncSchedule(tx: Tx, session: Session, project: Project, chapters: ProjectChapter[], groups: ScheduleGroup[], tasks: ScheduleTask[], rubros: ProjectRubro[]) {
+  const offer = rubros.filter((rubro) => !rubro.is_auxiliary);
+  const missing = offer.filter((rubro) => !tasks.some((task) => task.rubro_id === rubro.id));
+  if (groups.length && !missing.length) return { groups, tasks };
+  let nextGroups = groups;
+  if (!nextGroups.length) {
+    for (const chapter of chapters) {
+      await tx.insert("schedule_groups", { org_id: session.orgId, project_id: project.id, name: chapter.name, chapter_id: chapter.id, sort_order: chapter.sort_order });
+    }
+    nextGroups = as<ScheduleGroup>(await tx.list("schedule_groups", { project_id: project.id }));
+  }
+  for (const rubro of missing) {
+    const group = nextGroups.find((item) => item.chapter_id === rubro.chapter_id) ?? nextGroups[0];
+    await tx.insert("schedule_tasks", {
+      org_id: session.orgId, project_id: project.id, rubro_id: rubro.id, group_id: group?.id ?? "", start_date: project.work_start || todayIso(), duration_days: "5", responsible: "",
+    });
+  }
+  const nextTasks = missing.length || !groups.length ? as<ScheduleTask>(await tx.list("schedule_tasks", { project_id: project.id })) : tasks;
+  return { groups: nextGroups, tasks: nextTasks };
+}
+
 export async function ensureSchedule(projectId: string) {
   const session = await requireSession();
   await transaction(async (tx) => {
-    const project = await ownedProject(tx, session, projectId);
-    const chapters = sortBy(as<ProjectChapter>(await tx.list("project_chapters", { project_id: projectId })));
-    let groups = as<ScheduleGroup>(await tx.list("schedule_groups", { project_id: projectId }));
-    if (!groups.length) {
-      for (const chapter of chapters) {
-        await tx.insert("schedule_groups", { org_id: session.orgId, project_id: projectId, name: chapter.name, chapter_id: chapter.id, sort_order: chapter.sort_order });
-      }
-      groups = as<ScheduleGroup>(await tx.list("schedule_groups", { project_id: projectId }));
-    }
-    const rubros = as<ProjectRubro>(await tx.list("project_rubros", { project_id: projectId })).filter((rubro) => !rubro.is_auxiliary);
-    const tasks = as<ScheduleTask>(await tx.list("schedule_tasks", { project_id: projectId }));
-    for (const rubro of rubros) {
-      if (tasks.some((task) => task.rubro_id === rubro.id)) continue;
-      const group = groups.find((item) => item.chapter_id === rubro.chapter_id) ?? groups[0];
-      await tx.insert("schedule_tasks", {
-        org_id: session.orgId, project_id: projectId, rubro_id: rubro.id, group_id: group?.id ?? "", start_date: project.work_start || todayIso(), duration_days: "5", responsible: "",
-      });
-    }
+    const [project, chapterRows, groupRows, rubroRows, taskRows] = await Promise.all([
+      ownedProject(tx, session, projectId),
+      tx.list("project_chapters", { project_id: projectId }),
+      tx.list("schedule_groups", { project_id: projectId }),
+      tx.list("project_rubros", { project_id: projectId }),
+      tx.list("schedule_tasks", { project_id: projectId }),
+    ]);
+    await syncSchedule(tx, session, project, sortBy(as<ProjectChapter>(chapterRows)), as<ScheduleGroup>(groupRows), as<ScheduleTask>(taskRows), as<ProjectRubro>(rubroRows));
   });
 }
 
@@ -981,6 +1103,7 @@ export async function recalculateFamily(family: "material" | "labor" | "equipmen
       await tx.update("project_apu_lines", line.id, { unit_price: await priceFor(tx, session.orgId, scheme, family, line.catalog_id) });
     }
   });
+  clearProjectCache();
 }
 
 type CatalogTables = {
@@ -1089,7 +1212,7 @@ export async function importRows(projectName: string, rows: { chapter: string; c
 }
 
 export async function persistCrew(projectId: string) {
-  const data = await projectBundle(projectId);
+  const data = await projectBundle(projectId, "reajuste", { fresh: true });
   assertBudget(data.session);
   await transaction(async (tx) => {
     for (const row of await tx.list("crew_weights", { project_id: projectId })) await tx.remove("crew_weights", row.id);

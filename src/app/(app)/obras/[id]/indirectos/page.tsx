@@ -1,6 +1,7 @@
 import { addIndirectAction, saveIndirectAction } from "@/app/actions";
 import { IndirectFields } from "@/components/indirect-fields";
 import { Money, Notice, Panel, Submit, TextField } from "@/components/kit";
+import { SavingForm } from "@/components/saving-form";
 import { Button } from "@/components/ui";
 import { projectBundle } from "@/lib/domain";
 import { formatMoney } from "@/lib/engine/money";
@@ -8,7 +9,7 @@ import { formatMoney } from "@/lib/engine/money";
 export default async function IndirectPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ aviso?: string }> }) {
   const { id } = await params;
   const query = await searchParams;
-  const data = await projectBundle(id);
+  const data = await projectBundle(id, "indirectos");
   const editable = data.session.role === "admin" || data.session.role === "presupuestador";
   return (
     <div className="space-y-4">
@@ -18,7 +19,7 @@ export default async function IndirectPage({ params, searchParams }: { params: P
       {!data.indirectsMatch ? <p className="rounded-md border border-warning-border bg-warning px-3 py-2 text-sm text-warning-foreground">El desglose no coincide con el porcentaje general. Elija cuál debe quedar en cada concepto, con el botón correspondiente.</p> : null}
       {data.indirects.map((item) => (
         <Panel key={item.id} title={item.name}>
-          <form action={saveIndirectAction} className="space-y-4">
+          <SavingForm action={saveIndirectAction} className="space-y-4">
             <input type="hidden" name="projectId" value={id} /><input type="hidden" name="id" value={item.id} />
             <div className="grid gap-4 md:grid-cols-2">
               <TextField label="Nombre" name="name" defaultValue={item.name} />
@@ -44,16 +45,16 @@ export default async function IndirectPage({ params, searchParams }: { params: P
                 <Button type="submit" name="choice" value="breakdown" variant="secondary">Adoptar este desglose</Button>
               </div>
             ) : null}
-          </form>
+          </SavingForm>
         </Panel>
       ))}
       {editable ? (
         <Panel title="Nuevo concepto">
-          <form action={addIndirectAction} className="flex flex-wrap items-end gap-3">
+          <SavingForm action={addIndirectAction} className="flex flex-wrap items-end gap-3">
             <input type="hidden" name="projectId" value={id} />
             <div className="min-w-64 flex-1"><TextField label="Nombre" name="name" required placeholder="Ejemplo: residente de obra" /></div>
             <Submit pending="Agregando…">Agregar concepto</Submit>
-          </form>
+          </SavingForm>
         </Panel>
       ) : null}
     </div>

@@ -1,5 +1,6 @@
 import { contributorAction, deleteProjectAction, saveProjectAction } from "@/app/actions";
 import { DateText, Field, Money, Notice, Panel, Submit, TextField } from "@/components/kit";
+import { SavingForm } from "@/components/saving-form";
 import { Select, Textarea } from "@/components/ui";
 import { projectBundle } from "@/lib/domain";
 import { formatMoney } from "@/lib/engine/money";
@@ -7,7 +8,7 @@ import { formatMoney } from "@/lib/engine/money";
 export default async function ProjectDataPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ aviso?: string }> }) {
   const { id } = await params;
   const query = await searchParams;
-  const data = await projectBundle(id);
+  const data = await projectBundle(id, "datos");
   const project = data.project;
   const editable = data.session.role === "admin" || data.session.role === "presupuestador";
   return (
@@ -23,7 +24,7 @@ export default async function ProjectDataPage({ params, searchParams }: { params
       </header>
       <Notice message={query.aviso} />
       <Panel title="Datos generales">
-        <form action={saveProjectAction} className="space-y-6">
+        <SavingForm action={saveProjectAction} pending="Guardando datos…" className="space-y-6">
           <input type="hidden" name="id" value={id} />
           <div>
             <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Identificación</h3>
@@ -74,7 +75,7 @@ export default async function ProjectDataPage({ params, searchParams }: { params
             </div>
           </div>
           {editable ? <Submit pending="Guardando datos…">Guardar datos</Submit> : <p className="text-sm text-muted-foreground">Su rol puede consultar la obra.</p>}
-        </form>
+        </SavingForm>
       </Panel>
       <Panel title="Resumen">
         <p className="text-sm">Costo directo {formatMoney(data.priced.direct)} · Indirectos {formatMoney(data.priced.indirect)} · Oferta {formatMoney(data.priced.total)}</p>

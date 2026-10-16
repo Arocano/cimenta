@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
   addAdvance,
@@ -23,6 +24,7 @@ import {
   linkSupplier,
   moveRecord,
   persistCrew,
+  clearProjectCache,
   purgeBase,
   recalculateFamily,
   refreshPrices,
@@ -41,7 +43,6 @@ import {
   saveMemo,
   updateProject,
 } from "@/lib/domain";
-import { parseBudgetSheet } from "@/lib/files";
 import { assignProjects, createMember, loginAccount, logoutAccount, registerAccount, setOrganizationActive, switchOrganization } from "@/lib/session";
 import type { Role, TableName } from "@/lib/types";
 
@@ -121,6 +122,7 @@ export async function copyProjectAction(form: FormData) {
   const id = text(form, "id");
   try {
     const copy = await copyProject(id);
+    clearProjectCache();
     redirect(`/obras/${copy}`);
   } catch (error) {
     bounce(error, "/");
@@ -130,13 +132,32 @@ export async function copyProjectAction(form: FormData) {
 export async function deleteProjectAction(form: FormData) {
   try {
     await removeProject(text(form, "id"));
+    clearProjectCache();
     redirect("/");
   } catch (error) {
     bounce(error, `/obras/${text(form, "id")}`);
   }
 }
 
-export async function saveProjectAction(form: FormData) {
+export type SaveResult = { ok: boolean; message: string };
+
+function isRedirectError(error: unknown) {
+  return typeof error === "object" && error !== null && "digest" in error && String((error as { digest: unknown }).digest).startsWith("NEXT_REDIRECT");
+}
+
+function saved(path: string, message: string): SaveResult {
+  const projectId = path.match(/^\/obras\/([^/?]+)/)?.[1];
+  if (projectId) clearProjectCache(projectId);
+  revalidatePath(path.split("?")[0] || "/");
+  return { ok: true, message };
+}
+
+function failed(error: unknown): SaveResult {
+  if (isRedirectError(error)) throw error;
+  return { ok: false, message: error instanceof Error ? error.message : "No se pudo completar la operación." };
+}
+
+export async function saveProjectAction(form: FormData): Promise<SaveResult> {
   const id = text(form, "id");
   try {
     await updateProject(id, {
@@ -163,9 +184,12 @@ export async function saveProjectAction(form: FormData) {
       vae_threshold_id: text(form, "vae_threshold_id"),
       work_start: text(form, "work_start"),
     });
-    redirect(`/obras/${id}?aviso=${encodeURIComponent("Datos de la obra guardados.")}`);
+    clearProjectCache(id);
+    revalidatePath(`/obras/${id}`);
+    revalidatePath("/");
+    return { ok: true, message: "Datos de la obra guardados." };
   } catch (error) {
-    bounce(error, `/obras/${id}`);
+    return failed(error);
   }
 }
 
@@ -173,9 +197,9 @@ export async function addChapterAction(form: FormData) {
   const id = text(form, "projectId");
   try {
     await addChapter(id, text(form, "name"));
-    redirect(`/obras/${id}/presupuesto`);
+    return saved(`/obras/${id}/presupuesto`, "Capítulo agregado.");
   } catch (error) {
-    bounce(error, `/obras/${id}/presupuesto`);
+    return failed(error);
   }
 }
 
@@ -183,9 +207,9 @@ export async function moveAction(form: FormData) {
   const projectId = text(form, "projectId");
   try {
     await moveRecord(text(form, "table") as TableName, text(form, "id"), Number(text(form, "direction")), projectId, text(form, "parent") || undefined);
-    redirect(text(form, "back") || `/obras/${projectId}/presupuesto`);
+    return saved(text(form, "back") || `/obras/${projectId}/presupuesto`, "Orden actualizado.");
   } catch (error) {
-    bounce(error, `/obras/${projectId}/presupuesto`);
+    return failed(error);
   }
 }
 
@@ -193,9 +217,9 @@ export async function removeBudgetAction(form: FormData) {
   const projectId = text(form, "projectId");
   try {
     await removeOwned(text(form, "table") as TableName, text(form, "id"), projectId);
-    redirect(text(form, "back") || `/obras/${projectId}/presupuesto`);
+    return saved(text(form, "back") || `/obras/${projectId}/presupuesto`, "Rubro eliminado.");
   } catch (error) {
-    bounce(error, `/obras/${projectId}/presupuesto`);
+    return failed(error);
   }
 }
 
@@ -213,9 +237,9 @@ export async function addRubroAction(form: FormData) {
       is_auxiliary: text(form, "is_auxiliary"),
       origin: text(form, "origin"),
     }, text(form, "catalogId"));
-    redirect(`/obras/${projectId}/presupuesto?capitulo=${text(form, "chapterId")}`);
+    return saved(`/obras/${projectId}/presupuesto`, "Rubro agregado.");
   } catch (error) {
-    bounce(error, `/obras/${projectId}/presupuesto`);
+    return failed(error);
   }
 }
 
@@ -234,9 +258,9 @@ export async function updateRubroAction(form: FormData) {
       minor_tool_percent: text(form, "minor_tool_percent") || "0",
       origin: text(form, "origin") || "ND",
     }, projectId);
-    redirect(`/obras/${projectId}/presupuesto?capitulo=${text(form, "chapterId")}&rubro=${text(form, "id")}`);
+    return saved(`/obras/${projectId}/presupuesto`, "Rubro guardado.");
   } catch (error) {
-    bounce(error, `/obras/${projectId}/presupuesto`);
+    return failed(error);
   }
 }
 
@@ -258,9 +282,9 @@ export async function addLineAction(form: FormData) {
       origin: text(form, "origin") || "ND",
       cpc_code: text(form, "cpc_code"),
     });
-    redirect(back);
+    return saved(back, "Insumo agregado.");
   } catch (error) {
-    bounce(error, back);
+    return failed(error);
   }
 }
 
@@ -274,9 +298,9 @@ export async function updateLineAction(form: FormData) {
       origin: text(form, "origin"),
       cpc_code: text(form, "cpc_code"),
     }, projectId);
-    redirect(back);
+    return saved(back, "Línea guardada.");
   } catch (error) {
-    bounce(error, back);
+    return failed(error);
   }
 }
 
@@ -295,9 +319,9 @@ export async function saveIndirectAction(form: FormData) {
       premium_percent: text(form, "premium_percent") || "0",
       guarantee_percent: text(form, "guarantee_percent") || "0",
     }, (text(form, "choice") || undefined) as "general" | "breakdown" | undefined);
-    redirect(`/obras/${projectId}/indirectos?aviso=${encodeURIComponent("Indirectos actualizados.")}`);
+    return saved(`/obras/${projectId}/indirectos`, "Indirectos actualizados.");
   } catch (error) {
-    bounce(error, `/obras/${projectId}/indirectos`);
+    return failed(error);
   }
 }
 
@@ -305,9 +329,9 @@ export async function addIndirectAction(form: FormData) {
   const projectId = text(form, "projectId");
   try {
     await addIndirect(projectId, text(form, "name"));
-    redirect(`/obras/${projectId}/indirectos`);
+    return saved(`/obras/${projectId}/indirectos`, "Concepto agregado.");
   } catch (error) {
-    bounce(error, `/obras/${projectId}/indirectos`);
+    return failed(error);
   }
 }
 
@@ -316,9 +340,9 @@ export async function saveSymbolAction(form: FormData) {
   try {
     await saveIndex(projectId, text(form, "symbolId"), "base", text(form, "base") || "0", text(form, "coefficient"));
     await saveIndex(projectId, text(form, "symbolId"), "period", text(form, "period") || "0");
-    redirect(`/obras/${projectId}/reajuste`);
+    return saved(`/obras/${projectId}/reajuste`, "Símbolo guardado.");
   } catch (error) {
-    bounce(error, `/obras/${projectId}/reajuste`);
+    return failed(error);
   }
 }
 
@@ -327,9 +351,9 @@ export async function saveMemoAction(form: FormData) {
   try {
     await saveMemo(projectId, String(form.get("body") ?? ""));
     await persistCrew(projectId);
-    redirect(`/obras/${projectId}/reajuste?aviso=${encodeURIComponent("Informe y cuadrilla guardados.")}`);
+    return saved(`/obras/${projectId}/reajuste`, "Informe y cuadrilla guardados.");
   } catch (error) {
-    bounce(error, `/obras/${projectId}/reajuste`);
+    return failed(error);
   }
 }
 
@@ -342,9 +366,9 @@ export async function saveTaskAction(form: FormData) {
       responsible: text(form, "responsible"),
       group_id: text(form, "group_id"),
     }, projectId);
-    redirect(`/obras/${projectId}/cronograma?escala=${text(form, "escala") || "semana"}`);
+    return saved(`/obras/${projectId}/cronograma`, "Tarea guardada.");
   } catch (error) {
-    bounce(error, `/obras/${projectId}/cronograma`);
+    return failed(error);
   }
 }
 
@@ -358,9 +382,9 @@ export async function calendarAction(form: FormData) {
       }, projectId);
       await updateProject(projectId, { calendar_id: text(form, "calendarId"), work_start: text(form, "work_start") });
     }
-    redirect(`/obras/${projectId}/cronograma`);
+    return saved(`/obras/${projectId}/cronograma`, "Calendario guardado.");
   } catch (error) {
-    bounce(error, `/obras/${projectId}/cronograma`);
+    return failed(error);
   }
 }
 
@@ -368,9 +392,9 @@ export async function regroupAction(form: FormData) {
   const projectId = text(form, "projectId");
   try {
     await regroup(projectId, text(form, "manual") === "si");
-    redirect(`/obras/${projectId}/cronograma`);
+    return saved(`/obras/${projectId}/cronograma`, "Grupos actualizados.");
   } catch (error) {
-    bounce(error, `/obras/${projectId}/cronograma`);
+    return failed(error);
   }
 }
 
@@ -378,9 +402,9 @@ export async function periodsAction(form: FormData) {
   const projectId = text(form, "projectId");
   try {
     await generatePeriods(projectId, Number(text(form, "days") || 7), Number(text(form, "count") || 4));
-    redirect(`/obras/${projectId}/cronograma`);
+    return saved(`/obras/${projectId}/cronograma`, "Períodos generados.");
   } catch (error) {
-    bounce(error, `/obras/${projectId}/cronograma`);
+    return failed(error);
   }
 }
 
@@ -389,9 +413,9 @@ export async function allocationAction(form: FormData) {
   try {
     if (text(form, "full") === "si") await fillFull(projectId, text(form, "rubroId"));
     else await saveAllocation(projectId, text(form, "periodId"), text(form, "rubroId"), text(form, "percent") || "0", text(form, "subperiod") === "si");
-    redirect(`/obras/${projectId}/cronograma`);
+    return saved(`/obras/${projectId}/cronograma`, "Distribución guardada.");
   } catch (error) {
-    bounce(error, `/obras/${projectId}/cronograma`);
+    return failed(error);
   }
 }
 
@@ -403,9 +427,9 @@ export async function movementAction(form: FormData) {
       quantity: text(form, "quantity"), unit_price: text(form, "unit_price"), invoice: text(form, "invoice"),
       supplier_name: text(form, "supplier_name"), movement_date: text(form, "movement_date"),
     });
-    redirect(`/obras/${projectId}/bodega`);
+    return saved(`/obras/${projectId}/bodega`, "Movimiento registrado.");
   } catch (error) {
-    bounce(error, `/obras/${projectId}/bodega`);
+    return failed(error);
   }
 }
 
@@ -413,9 +437,9 @@ export async function removeMovementAction(form: FormData) {
   const projectId = text(form, "projectId");
   try {
     await removeWarehouse(projectId, text(form, "id"));
-    redirect(`/obras/${projectId}/bodega`);
+    return saved(`/obras/${projectId}/bodega`, "Movimiento quitado.");
   } catch (error) {
-    bounce(error, `/obras/${projectId}/bodega`);
+    return failed(error);
   }
 }
 
@@ -423,9 +447,9 @@ export async function advanceAction(form: FormData) {
   const projectId = text(form, "projectId");
   try {
     await addAdvance(projectId, text(form, "amount") || "0", text(form, "advance_date"), text(form, "note"));
-    redirect(`/obras/${projectId}/planillas`);
+    return saved(`/obras/${projectId}/planillas`, "Anticipo registrado.");
   } catch (error) {
-    bounce(error, `/obras/${projectId}/planillas`);
+    return failed(error);
   }
 }
 
@@ -433,9 +457,9 @@ export async function deductionAction(form: FormData) {
   const projectId = text(form, "projectId");
   try {
     await addDeduction(projectId, text(form, "name"), text(form, "mode") || "amount", text(form, "amount") || "0");
-    redirect(`/obras/${projectId}/planillas`);
+    return saved(`/obras/${projectId}/planillas`, "Deducible registrado.");
   } catch (error) {
-    bounce(error, `/obras/${projectId}/planillas`);
+    return failed(error);
   }
 }
 
@@ -443,19 +467,19 @@ export async function removeExecutionAction(form: FormData) {
   const projectId = text(form, "projectId");
   try {
     await removeExecution(text(form, "table") as TableName, projectId, text(form, "id"));
-    redirect(`/obras/${projectId}/planillas`);
+    return saved(`/obras/${projectId}/planillas`, "Registro quitado.");
   } catch (error) {
-    bounce(error, `/obras/${projectId}/planillas`);
+    return failed(error);
   }
 }
 
 export async function certificateAction(form: FormData) {
   const projectId = text(form, "projectId");
   try {
-    const id = await createCertificate(projectId, text(form, "period_label"));
-    redirect(`/obras/${projectId}/planillas?planilla=${id}`);
+    await createCertificate(projectId, text(form, "period_label"));
+    return saved(`/obras/${projectId}/planillas`, "Planilla creada.");
   } catch (error) {
-    bounce(error, `/obras/${projectId}/planillas`);
+    return failed(error);
   }
 }
 
@@ -463,9 +487,9 @@ export async function certificateLineAction(form: FormData) {
   const projectId = text(form, "projectId");
   try {
     await saveCertificateLine(projectId, text(form, "id"), text(form, "quantity") || "0", text(form, "amortization"), text(form, "certificateId"));
-    redirect(`/obras/${projectId}/planillas?planilla=${text(form, "certificateId")}`);
+    return saved(`/obras/${projectId}/planillas`, "Planilla actualizada.");
   } catch (error) {
-    bounce(error, `/obras/${projectId}/planillas`);
+    return failed(error);
   }
 }
 
@@ -477,9 +501,9 @@ export async function priceToolsAction(form: FormData) {
     if (tool === "bump") await bumpPrices(projectId, text(form, "percent") || "0", text(form, "bumpFamily"));
     if (tool === "replace") await replaceInput(projectId, text(form, "query"), text(form, "kind"), text(form, "catalogId"));
     if (tool === "import") await importFromProject(projectId, text(form, "sourceId"), text(form, "includeCatalog") === "si");
-    redirect(`/obras/${projectId}/presupuesto?aviso=${encodeURIComponent("Precios actualizados.")}`);
+    return saved(`/obras/${projectId}/presupuesto`, "Precios actualizados.");
   } catch (error) {
-    bounce(error, `/obras/${projectId}/presupuesto`);
+    return failed(error);
   }
 }
 
@@ -487,8 +511,10 @@ export async function importExcelAction(form: FormData) {
   try {
     const file = form.get("file");
     if (!(file instanceof File) || file.size === 0) throw new Error("Seleccione un archivo Excel.");
+    const { parseBudgetSheet } = await import("@/lib/files");
     const rows = await parseBudgetSheet(await file.arrayBuffer());
     const id = await importRows(text(form, "name") || file.name.replace(/\.xlsx$/i, ""), rows, text(form, "includeCatalog") === "si");
+    clearProjectCache();
     redirect(`/obras/${id}/presupuesto`);
   } catch (error) {
     bounce(error, "/");
@@ -502,6 +528,7 @@ export async function contributorAction(form: FormData) {
       company: text(form, "company"), material_percent: text(form, "material_percent"), labor_percent: text(form, "labor_percent"),
       equipment_percent: text(form, "equipment_percent"), transport_percent: text(form, "transport_percent"),
     });
+    clearProjectCache(projectId);
     redirect(`/obras/${projectId}`);
   } catch (error) {
     bounce(error, `/obras/${projectId}`);

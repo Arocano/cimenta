@@ -1,6 +1,6 @@
 import { movementAction, removeMovementAction } from "@/app/actions";
-import { ConfirmForm } from "@/components/confirm-form";
 import { DataTable, Field, Money, Panel, Submit, TextField } from "@/components/kit";
+import { SavingForm } from "@/components/saving-form";
 import { Select } from "@/components/ui";
 import { projectBundle } from "@/lib/domain";
 import { dec, formatMoney } from "@/lib/engine/money";
@@ -8,7 +8,7 @@ import { dec, formatMoney } from "@/lib/engine/money";
 export default async function WarehousePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ desde?: string; hasta?: string; material?: string; rubro?: string }> }) {
   const { id } = await params;
   const query = await searchParams;
-  const data = await projectBundle(id);
+  const data = await projectBundle(id, "bodega");
   const canWrite = data.session.role === "admin" || data.session.role === "bodega";
   const movements = data.movements.filter((move) => {
     if (query.desde && move.movement_date < query.desde) return false;
@@ -54,17 +54,17 @@ export default async function WarehousePage({ params, searchParams }: { params: 
               <td className="px-2 py-2">{move.invoice}</td>
               <td className="px-2 py-2">{move.supplier_name}</td>
               <td className="px-2 py-2">{canWrite ? (
-                <ConfirmForm action={removeMovementAction} message="¿Quitar este movimiento de bodega?">
+                <SavingForm action={removeMovementAction} confirm="¿Quitar este movimiento de bodega?" pending="Quitando…">
                   <input type="hidden" name="projectId" value={id} />
                   <input type="hidden" name="id" value={move.id} />
                   <Submit variant="danger" pending="Quitando…" className="h-9">Quitar</Submit>
-                </ConfirmForm>
+                </SavingForm>
               ) : null}</td>
             </tr>
           ))}
         </DataTable>
         {canWrite ? (
-          <form action={movementAction} className="mt-4 space-y-4 border-t border-border pt-4">
+          <SavingForm action={movementAction} pending="Registrando…" className="mt-4 space-y-4 border-t border-border pt-4">
             <h3 className="text-sm font-medium">Registrar movimiento</h3>
             <input type="hidden" name="projectId" value={id} />
             <div className="grid gap-4 md:grid-cols-2">
@@ -90,7 +90,7 @@ export default async function WarehousePage({ params, searchParams }: { params: 
             <div className="border-t border-border pt-4">
               <Submit pending="Registrando…">Registrar movimiento</Submit>
             </div>
-          </form>
+          </SavingForm>
         ) : null}
       </Panel>
     </div>

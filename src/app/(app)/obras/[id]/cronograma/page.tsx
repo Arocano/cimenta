@@ -1,15 +1,16 @@
 import { allocationAction, calendarAction, periodsAction, regroupAction, saveTaskAction } from "@/app/actions";
-import { GanttChart, InvestmentChart } from "@/components/charts";
+import { GanttChart } from "@/components/charts";
+import { InvestmentChart } from "@/components/lazy-charts";
+import { SavingForm } from "@/components/saving-form";
 import { DataTable, Panel, Submit, TextField } from "@/components/kit";
-import { ensureSchedule, projectBundle } from "@/lib/domain";
+import { projectBundle } from "@/lib/domain";
 import { addWorkingDays } from "@/lib/engine/budget";
 import { dec, formatMoney } from "@/lib/engine/money";
 
 export default async function SchedulePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ escala?: string }> }) {
   const { id } = await params;
   const query = await searchParams;
-  await ensureSchedule(id);
-  const data = await projectBundle(id);
+  const data = await projectBundle(id, "cronograma");
   const editable = data.session.role === "admin" || data.session.role === "presupuestador";
   const scale = query.escala || "semana";
   const tasks = data.tasks.map((task) => {
@@ -26,7 +27,7 @@ export default async function SchedulePage({ params, searchParams }: { params: P
       </div>
       <Panel title="Calendario laboral">
         {data.calendars.map((calendar) => (
-          <form key={calendar.id} action={calendarAction} className="mb-4 space-y-4">
+          <SavingForm key={calendar.id} action={calendarAction} className="mb-4 space-y-4">
             <input type="hidden" name="projectId" value={id} /><input type="hidden" name="calendarId" value={calendar.id} />
             <div className="grid gap-4 md:grid-cols-2">
               <TextField label="Nombre" name="name" defaultValue={calendar.name} />
@@ -47,12 +48,12 @@ export default async function SchedulePage({ params, searchParams }: { params: P
               </div>
             </div>
             {editable ? <div className="border-t border-border pt-4"><Submit pending="Guardando…">Guardar calendario</Submit></div> : null}
-          </form>
+          </SavingForm>
         ))}
         {editable ? (
           <div className="flex gap-2">
-            <form action={regroupAction}><input type="hidden" name="projectId" value={id} /><input type="hidden" name="manual" value="no" /><Submit variant="secondary">Agrupar por capítulo</Submit></form>
-            <form action={regroupAction}><input type="hidden" name="projectId" value={id} /><input type="hidden" name="manual" value="si" /><Submit variant="secondary">Rearmar a mano</Submit></form>
+            <SavingForm action={regroupAction}><input type="hidden" name="projectId" value={id} /><input type="hidden" name="manual" value="no" /><Submit variant="secondary">Agrupar por capítulo</Submit></SavingForm>
+            <SavingForm action={regroupAction}><input type="hidden" name="projectId" value={id} /><input type="hidden" name="manual" value="si" /><Submit variant="secondary">Rearmar a mano</Submit></SavingForm>
           </div>
         ) : null}
       </Panel>
@@ -62,7 +63,7 @@ export default async function SchedulePage({ params, searchParams }: { params: P
           {tasks.map((task) => (
             <tr key={task.id} className="border-b border-border">
               <td className="px-2 py-2" colSpan={7}>
-                <form action={saveTaskAction} className="flex flex-wrap items-center gap-2">
+                <SavingForm action={saveTaskAction} className="flex flex-wrap items-center gap-2">
                   <input type="hidden" name="projectId" value={id} /><input type="hidden" name="id" value={task.id} /><input type="hidden" name="escala" value={scale} />
                   <span className="w-48">{task.name}</span>
                   <select name="group_id" defaultValue={task.group_id} className="h-8 rounded border px-2 text-sm">{data.groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select>
@@ -71,7 +72,7 @@ export default async function SchedulePage({ params, searchParams }: { params: P
                   <span className="w-28 text-xs">{task.end}</span>
                   <input name="responsible" defaultValue={task.responsible} className="h-8 w-36 rounded border px-2" />
                   {editable ? <Submit variant="secondary">Guardar</Submit> : null}
-                </form>
+                </SavingForm>
               </td>
             </tr>
           ))}
@@ -79,12 +80,12 @@ export default async function SchedulePage({ params, searchParams }: { params: P
       </Panel>
       <Panel title="Cronograma valorado">
         {editable ? (
-          <form action={periodsAction} className="mb-3 flex flex-wrap gap-2">
+          <SavingForm action={periodsAction} className="mb-3 flex flex-wrap gap-2">
             <input type="hidden" name="projectId" value={id} />
             <TextField label="Días del período" name="days" defaultValue="7" />
             <TextField label="Cantidad" name="count" defaultValue="4" />
             <Submit>Generar períodos</Submit>
-          </form>
+          </SavingForm>
         ) : null}
         {offer.map((rubro) => {
           const percents = data.allocations.filter((item) => item.rubro_id === rubro.id).map((item) => item.percent);
@@ -97,15 +98,15 @@ export default async function SchedulePage({ params, searchParams }: { params: P
                 {data.periods.map((period) => {
                   const allocation = data.allocations.find((item) => item.period_id === period.id && item.rubro_id === rubro.id && !item.is_subperiod);
                   return (
-                    <form key={period.id} action={allocationAction} className="flex items-center gap-1 text-xs">
+                    <SavingForm key={period.id} action={allocationAction} className="flex items-center gap-1 text-xs">
                       <input type="hidden" name="projectId" value={id} /><input type="hidden" name="periodId" value={period.id} /><input type="hidden" name="rubroId" value={rubro.id} />
                       <span>{period.name}</span>
                       <input name="percent" defaultValue={allocation?.percent ?? "0"} className="h-8 w-16 rounded border px-2" />
                       {editable ? <button className="underline">%</button> : null}
-                    </form>
+                    </SavingForm>
                   );
                 })}
-                {editable ? <form action={allocationAction}><input type="hidden" name="projectId" value={id} /><input type="hidden" name="rubroId" value={rubro.id} /><input type="hidden" name="full" value="si" /><button className="text-xs underline">Cargar 100 % entre inicio y fin</button></form> : null}
+                {editable ? <SavingForm action={allocationAction}><input type="hidden" name="projectId" value={id} /><input type="hidden" name="rubroId" value={rubro.id} /><input type="hidden" name="full" value="si" /><button className="text-xs underline">Cargar 100 % entre inicio y fin</button></SavingForm> : null}
               </div>
             </div>
           );

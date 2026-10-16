@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { cache } from "react";
 import { createServiceClient, supabaseConfigured, transaction, type Row } from "./db";
 import { hashPassword, verifyPassword } from "./password";
 import { seedCatalog } from "./seed";
@@ -62,47 +63,59 @@ function orgIsActive(org: Organization | undefined) {
   return org?.active !== false;
 }
 
+const platformChecked = new Set<string>();
+
 async function promotePlatformAdmin(userId: string, email: string) {
+  if (platformChecked.has(userId)) return false;
   const listed = platformEmails().includes(email.trim().toLowerCase());
   if (supabaseConfigured()) {
     const admin = await createServiceClient();
-    if (!admin) return;
+    if (!admin) return false;
     if (!listed) {
       const { count } = await admin.from("platform_admins").select("user_id", { count: "exact", head: true });
-      if (count && count > 0) return;
+      if (count && count > 0) {
+        platformChecked.add(userId);
+        return false;
+      }
       const { data: membership } = await admin.from("organization_members").select("user_id").eq("user_id", userId).eq("role", "admin").limit(1);
-      if (!membership?.length) return;
+      if (!membership?.length) return false;
     }
     await admin.from("platform_admins").upsert({ user_id: userId }, { onConflict: "user_id" });
-    return;
+    platformChecked.add(userId);
+    return true;
   }
-  await transaction(async (tx) => {
+  return transaction(async (tx) => {
     const existing = await tx.list("platform_admins", { user_id: userId });
-    if (existing.length) return;
+    if (existing.length) {
+      platformChecked.add(userId);
+      return false;
+    }
     const others = await tx.list("platform_admins");
     const isOrgAdmin = (await tx.list("organization_members", { user_id: userId, role: "admin" })).length > 0;
-    if (!listed && (others.length > 0 || !isOrgAdmin)) return;
+    if (!listed && (others.length > 0 || !isOrgAdmin)) return false;
     await tx.insert("platform_admins", { user_id: userId, created_at: new Date().toISOString() });
+    platformChecked.add(userId);
+    return true;
   });
 }
 
 async function assemble(userId: string, email: string): Promise<Session | null> {
   return transaction(async (tx) => {
-    const membershipRows = (await tx.list("organization_members", { user_id: userId })) as Membership[];
-    if (!membershipRows.length) return null;
-    const orgs = (await tx.list("organizations")) as Organization[];
     const jar = await cookies();
     const preferred = jar.get(ORG)?.value;
+    const [membershipRows, orgs, assignedAll, profileRows, adminRows] = await Promise.all([
+      tx.list("organization_members", { user_id: userId }) as Promise<Membership[]>,
+      tx.list("organizations") as Promise<Organization[]>,
+      tx.list("project_members", { user_id: userId }) as Promise<ProjectMember[]>,
+      tx.list("profiles", { id: userId }),
+      tx.list("platform_admins", { user_id: userId }).catch(() => [] as Row[]),
+    ]);
+    if (!membershipRows.length) return null;
     const membership = membershipRows.find((item) => item.org_id === preferred) ?? membershipRows[0];
+    const assigned = assignedAll.filter((item) => item.org_id === membership.org_id);
     const org = orgs.find((item) => item.id === membership.org_id);
-    const assigned = (await tx.list("project_members", { user_id: userId, org_id: membership.org_id })) as ProjectMember[];
-    const profile = (await tx.list("profiles", { id: userId }))[0] as Profile | undefined;
-    let isPlatformAdmin = false;
-    try {
-      isPlatformAdmin = (await tx.list("platform_admins", { user_id: userId })).length > 0;
-    } catch {
-      isPlatformAdmin = false;
-    }
+    const profile = profileRows[0] as Profile | undefined;
+    const isPlatformAdmin = adminRows.length > 0;
     return {
       userId,
       email: email || profile?.email || "",
@@ -126,7 +139,22 @@ async function assemble(userId: string, email: string): Promise<Session | null> 
   });
 }
 
-export async function getSession(): Promise<Session | null> {
+const SESSION_TTL = 45_000;
+const sessionCache = new Map<string, { at: number; session: Session }>();
+
+function sessionCacheKey(jar: { get(name: string): { value: string } | undefined; getAll(): { name: string; value: string }[] }) {
+  const auth = jar
+    .getAll()
+    .filter((cookie) => cookie.name.includes("-auth-token"))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((cookie) => cookie.value)
+    .join("");
+  const token = auth || jar.get(UID)?.value || "";
+  if (!token) return "";
+  return `${token}:${jar.get(ORG)?.value ?? ""}`;
+}
+
+async function loadSession(): Promise<Session | null> {
   if (supabaseConfigured()) {
     const { createClient } = await import("./supabase/server");
     const supabase = await createClient();
@@ -134,10 +162,7 @@ export async function getSession(): Promise<Session | null> {
     if (!data.user) return null;
     const email = data.user.email ?? "";
     let session = await assemble(data.user.id, email);
-    if (session && !session.isPlatformAdmin) {
-      await promotePlatformAdmin(data.user.id, email);
-      session = await assemble(data.user.id, email);
-    }
+    if (session && !session.isPlatformAdmin && (await promotePlatformAdmin(data.user.id, email))) session = await assemble(data.user.id, email);
     return session;
   }
   const userId = (await cookies()).get(UID)?.value;
@@ -145,12 +170,19 @@ export async function getSession(): Promise<Session | null> {
   const user = await transaction(async (tx) => (await tx.list("users", { id: userId }))[0] as UserRow | undefined);
   if (!user) return null;
   let session = await assemble(user.id, user.email);
-  if (session && !session.isPlatformAdmin) {
-    await promotePlatformAdmin(user.id, user.email);
-    session = await assemble(user.id, user.email);
-  }
+  if (session && !session.isPlatformAdmin && (await promotePlatformAdmin(user.id, user.email))) session = await assemble(user.id, user.email);
   return session;
 }
+
+export const getSession = cache(async function getSession(): Promise<Session | null> {
+  const jar = await cookies();
+  const key = sessionCacheKey(jar);
+  const hit = key ? sessionCache.get(key) : undefined;
+  if (hit && Date.now() - hit.at < SESSION_TTL) return hit.session;
+  const session = await loadSession();
+  if (key && session) sessionCache.set(key, { at: Date.now(), session });
+  return session;
+});
 
 export async function requireSession(options?: { allowInactive?: boolean }): Promise<Session> {
   const session = await getSession();

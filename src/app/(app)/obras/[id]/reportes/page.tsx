@@ -1,4 +1,4 @@
-import { CompareChart } from "@/components/charts";
+import { CompareChart } from "@/components/lazy-charts";
 import { Panel } from "@/components/kit";
 import { projectBundle } from "@/lib/domain";
 import { dec } from "@/lib/engine/money";
@@ -22,7 +22,7 @@ const reports = [
 
 export default async function ReportsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const data = await projectBundle(id);
+  const data = await projectBundle(id, "reportes");
   const points = data.chapters.map((chapter) => ({ name: chapter.name, total: Number(data.priced.chapters.find((item) => item.chapterId === chapter.id)?.total ?? 0) }));
   const direct = dec(data.priced.direct);
   const total = dec(data.priced.total);
